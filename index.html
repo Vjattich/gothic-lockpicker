@@ -192,7 +192,7 @@
             align-items: stretch;
         }
 
-        #resetBtn {
+        #resetBtn, #shareBtn {
             flex: 0 0 44px;
             padding: 0;
             margin: 0;
@@ -614,7 +614,7 @@
         }
 
         @media (hover: hover) {
-            .num-btn:hover, .controls button:hover, #resetBtn:hover {
+            .num-btn:hover, .controls button:hover, #resetBtn:hover, #shareBtn:hover {
                 background: #444;
             }
 
@@ -734,6 +734,10 @@
             #squashLabel, #scaleLabel, #expandBtn, #blockCountContainer .label-text, #countInput {
                 display: none !important;
             }
+
+            #resetBtn { order: 1; }
+            #shareBtn { order: 2; }
+            #solveBtn { order: 3; }
 
             #blockCountContainer .number-control {
                 display: flex;
@@ -992,6 +996,15 @@
             </svg>
         </button>
         <button id="solveBtn">Solve Lock</button>
+        <button aria-label="Share" id="shareBtn" title="Share Lock State">
+            <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="18" cy="5" r="3"></circle>
+                <circle cx="6" cy="12" r="3"></circle>
+                <circle cx="18" cy="19" r="3"></circle>
+                <line x1="8.59" y1="13.51" x2="15.42" y2="17.49"></line>
+                <line x1="15.41" y1="6.51" x2="8.59" y2="10.49"></line>
+            </svg>
+        </button>
     </div>
     <label class="toggle-label dynamic-control" id="squashLabel">
         <input checked id="squashMovesCheck" type="checkbox">Squash
