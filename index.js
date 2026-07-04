@@ -42,7 +42,9 @@ const lock = document.getElementById('lock'),
     statusMsg = document.getElementById('statusMsg'),
     solutionList = document.getElementById('solutionList'),
     expandBtn = document.getElementById('expandBtn'),
-    inspectorRow = document.getElementById('inspectorRow');
+    inspectorRow = document.getElementById('inspectorRow'),
+    shareBtn = document.getElementById('shareBtn'),
+    steamGuideBtn = document.getElementById('steamGuideBtn');
 
 const
     PIN_RAISED = -10,
@@ -623,6 +625,41 @@ function createPlate(id, prevX, zPos) {
     return { plate, pinWrapper, pin };
 }
 
+function loadStateFromURL() {
+    const params = new URLSearchParams(window.location.search);
+    const stateParam = params.get('state');
+    if (!stateParam) return false;
+
+    try {
+        const stateObj = JSON.parse(atob(stateParam));
+        if (!stateObj.n || !stateObj.start || !stateObj.effects) return false;
+
+        countInput.value = stateObj.n;
+        gameState.blocks = [];
+        renderBlocks();
+
+        for (let i = 0; i < stateObj.n; i++) {
+            const b = gameState.blocks[i];
+            b.x = stateObj.start[i] * HOLE_SPACING;
+            b.group = {};
+            stateObj.effects[i].forEach((rel, j) => {
+                if (rel !== 0) {
+                    b.group[j + 1] = rel;
+                }
+            });
+            updateBlockState(b, { x: b.x });
+        }
+
+        const cleanUrl = new URL(window.location.href);
+        cleanUrl.searchParams.delete('state');
+        window.history.replaceState({}, document.title, cleanUrl.toString());
+        return true;
+    } catch (e) {
+        console.error("Failed to load shared state:", e);
+        return false;
+    }
+}
+
 function renderBlocks() {
     const
         count = +countInput.value,
@@ -769,7 +806,9 @@ resetBtn.addEventListener('click', () => {
     renderBlocks();
 });
 
-renderBlocks();
+if (!loadStateFromURL()) {
+    renderBlocks();
+}
 
 function getClientX(e) {
     return e.touches && e.touches.length > 0 ? e.touches[0].clientX : e.clientX;
@@ -1241,3 +1280,25 @@ document.addEventListener('touchstart', handleDragStart, {passive: false});
 document.addEventListener('touchmove', handleDragMove, {passive: false});
 window.addEventListener('touchend', handleDragEnd);
 document.addEventListener('touchcancel', handleDragEnd);
+
+let shareStatusTimeout;
+
+shareBtn.addEventListener('click', () => {
+    const encoded = btoa(JSON.stringify(compactSetup()));
+
+    const url = new URL(window.location.href);
+    url.searchParams.set('state', encoded);
+
+    navigator.clipboard.writeText(url.toString()).then(() => {
+        setStatus('Share link copied to clipboard!', 'success');
+        clearTimeout(shareStatusTimeout);
+        shareStatusTimeout = setTimeout(() => {
+            if (statusMsg.textContent === 'Share link copied to clipboard!') {
+                setStatus('', 'info');
+            }
+        }, 1500);
+    }).catch(err => {
+        setStatus('Failed to copy link.', 'error');
+    });
+});
+
