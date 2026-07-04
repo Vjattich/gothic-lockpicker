@@ -638,8 +638,10 @@ function createPlate(id, prevX, zPos) {
 }
 
 function loadFromURL() {
-    const params = new URLSearchParams(window.location.search);
-    const stateParam = params.get('state');
+    const
+        params = new URLSearchParams(window.location.search),
+        stateParam = params.get('state');
+
     if (!stateParam) return false;
 
     try {
