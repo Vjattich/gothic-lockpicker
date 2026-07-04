@@ -116,6 +116,7 @@ function endTutorial() {
 function clean() {
     tutorialArrow.style.display = 'none';
 
+    clearSolutionUI();
     clearHoverPreview();
 
     gameState.blocks.forEach(b => {
@@ -440,6 +441,13 @@ async function runTutorialStep(version) {
             playBtn.click();
             tutorialArrow.style.display = 'none';
             await stepSleep(3000);
+        }
+    } else if (8 === tutorialStep) {
+        clean();
+        tutorialText.textContent = 'You can share your current lock with others by pressing the share button. Better if u share it in steam guide with comment where it stands for feature database';
+        while (version === currentTutorialVersion) {
+            positionArrowRelative(shareBtn, 15, -40);
+            await stepSleep(2000);
         }
     } else {
         endTutorial();
