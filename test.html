@@ -929,13 +929,14 @@
             assert.strictEqual(loadStateFromURL(), false, 'Returns false when required properties (start, effects) are missing');
         });
 
-        QUnit.test('Correctly decodes valid state, applies it to game state, and cleans URL', assert => {
+        QUnit.test('Correctly decodes valid state, applies it to game state, cleans URL, and renders UI updates', assert => {
+
             const validState = {
                 n: 2,
                 start: [1, -1],
                 effects: [
-                    [0, 1],
-                    [-1, 0],
+                    [1, 1],
+                    [-1, 1],
                 ]
             };
 
@@ -943,6 +944,9 @@
             window.history.pushState({}, '', '?state=' + encodedState);
 
             const replaceStateSpy = sinon.spy(window.history, 'replaceState');
+
+            const originalIsMobile = gameState.isMobile;
+            gameState.isMobile = true;
 
             const result = loadStateFromURL();
 
@@ -956,9 +960,58 @@
             assert.strictEqual(gameState.blocks[0].group[2], 1, 'Restores forward link relationship on Block 1 targeting Block 2');
             assert.strictEqual(gameState.blocks[1].group[1], -1, 'Restores reverse link relationship on Block 2 targeting Block 1');
 
+            assert.strictEqual(
+                gameState.blocks[0].pinWrapper.style.transform,
+                `translateX(${-1 * HOLE_SPACING}px)`,
+                'Pin wrapper 1 transform is successfully updated to inversely mirror block 1 offset'
+            );
+            assert.strictEqual(
+                gameState.blocks[1].pinWrapper.style.transform,
+                `translateX(${1 * HOLE_SPACING}px)`,
+                'Pin wrapper 2 transform is successfully updated to inversely mirror block 2 offset'
+            );
+
+            assert.strictEqual(
+                gameState.blocks[0].pin.style.transform,
+                'translateZ(-5px)',
+                'Pin 1 transform is successfully updated to PIN_MIDDLE (-5px) height since it is not at offset 0'
+            );
+            assert.strictEqual(
+                gameState.blocks[1].pin.style.transform,
+                'translateZ(-5px)',
+                'Pin 2 transform is successfully updated to PIN_MIDDLE (-5px) height since it is not at offset 0'
+            );
+
+            // --- Inspector Row DOM Verifications ---
+            assert.strictEqual(inspectorRow.children.length, 8, 'renderInspectorRow appends exactly MAX_PLATES (8) buttons to the inspector row');
+
+            assert.ok(inspectorRow.children[0].classList.contains('inspect-btn'), 'First element correctly receives the inspect-btn class');
+            assert.notOk(inspectorRow.children[0].classList.contains('disabled-btn'), 'Button 1 is active (not disabled) since Block 1 exists');
+            assert.notOk(inspectorRow.children[1].classList.contains('disabled-btn'), 'Button 2 is active (not disabled) since Block 2 exists');
+
+            assert.strictEqual(
+                inspectorRow.children[0].dataset.defaultBg,
+                '#66d43722',
+                'Button 1 correctly receives the green transparent background data attribute for connections'
+            );
+            assert.ok(
+                inspectorRow.children[0].style.borderColor.includes('102') || inspectorRow.children[0].style.borderColor.includes('66d437'),
+                'Button 1 correctly receives the green connection border color'
+            );
+            assert.ok(
+                inspectorRow.children[0].style.color.includes('102') || inspectorRow.children[0].style.color.includes('66d437'),
+                'Button 1 correctly receives the green connection text color'
+            );
+
+            assert.ok(inspectorRow.children[2].classList.contains('disabled-btn'), 'Button 3 correctly receives the disabled-btn class since Block 3 does not exist');
+            assert.ok(inspectorRow.children[7].classList.contains('disabled-btn'), 'Button 8 correctly receives the disabled-btn class since Block 8 does not exist');
+
             assert.ok(replaceStateSpy.calledOnce, 'window.history.replaceState is triggered to clean up the URL');
             const newUrl = replaceStateSpy.firstCall.args[2];
             assert.notOk(newUrl.includes('state='), 'The state query parameter is permanently stripped from the newly replaced URL');
+
+            replaceStateSpy.restore();
+            gameState.isMobile = originalIsMobile;
         });
     });
 
