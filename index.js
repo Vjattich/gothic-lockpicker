@@ -151,7 +151,9 @@ let currentSolution = null,
     isPlaying = false,
     moveMap = [],
     dragRafId = null,
-    currentClientX = 0;
+    currentClientX = 0,
+    initialSolveSetup = null
+;
 
 function setStatus(text, type = 'info') {
     statusMsg.textContent = text;
@@ -166,6 +168,7 @@ function clearSolutionUI() {
     currentSolution = null;
     currentStepIndex = 0;
     isPlaying = false;
+    initialSolveSetup = null;
     playBtn.style.display = 'none';
     playBtn.textContent = '▶ Play';
     restartSeqBtn.style.display = 'none';
@@ -393,6 +396,7 @@ solveBtn.addEventListener('click', async () => {
         return;
     }
     clearSolutionUI();
+    initialSolveSetup = setup;
     solveBtn.textContent = 'Solving...';
     solveBtn.disabled = true;
     setStatus('Calculating solution...', 'info');
@@ -633,7 +637,7 @@ function createPlate(id, prevX, zPos) {
     return { plate, pinWrapper, pin };
 }
 
-function loadStateFromURL() {
+function loadFromURL() {
     const params = new URLSearchParams(window.location.search);
     const stateParam = params.get('state');
     if (!stateParam) return false;
@@ -664,6 +668,7 @@ function loadStateFromURL() {
         const cleanUrl = new URL(window.location.href);
         cleanUrl.searchParams.delete('state');
         window.history.replaceState({}, document.title, cleanUrl.toString());
+        solveBtn.click();
         return true;
     } catch (e) {
         console.error("Failed to load shared state:", e);
@@ -819,7 +824,7 @@ resetBtn.addEventListener('click', () => {
     renderBlocks();
 });
 
-if (!loadStateFromURL()) {
+if (!loadFromURL()) {
     renderBlocks();
 }
 
@@ -1297,16 +1302,18 @@ document.addEventListener('touchcancel', handleDragEnd);
 let shareStatusTimeout;
 
 shareBtn.addEventListener('click', () => {
-    const encoded = btoa(JSON.stringify(compactSetup()));
+    const
+        value = initialSolveSetup || compactSetup(),
+        encoded = btoa(JSON.stringify(value)),
+        url = new URL(window.location.href);
 
-    const url = new URL(window.location.href);
     url.searchParams.set('state', encoded);
 
     navigator.clipboard.writeText(url.toString()).then(() => {
         setStatus('Share link copied to clipboard!', 'success');
         clearTimeout(shareStatusTimeout);
         shareStatusTimeout = setTimeout(() => {
-            if (statusMsg.textContent === 'Share link copied to clipboard!') {
+            if ('Share link copied to clipboard!' === statusMsg.textContent) {
                 setStatus('', 'info');
             }
         }, 1500);

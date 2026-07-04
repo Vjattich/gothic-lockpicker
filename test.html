@@ -911,22 +911,24 @@
             window.history.replaceState = originalReplaceState;
             window.history.pushState({}, '', window.location.pathname);
             sinon.restore();
+            gameState.isMobile = false;
+            clearSolutionUI();
         });
 
         QUnit.test('Returns false when no state parameter is present in URL', assert => {
-            assert.strictEqual(loadStateFromURL(), false, 'Returns false when there is no state param');
+            assert.strictEqual(loadFromURL(), false, 'Returns false when there is no state param');
         });
 
         QUnit.test('Returns false and handles gracefully when state parameter is invalid', assert => {
             window.history.pushState({}, '', '?state=INVALID_BASE_64_&&&');
-            assert.strictEqual(loadStateFromURL(), false, 'Returns false on invalid base64 string without crashing');
+            assert.strictEqual(loadFromURL(), false, 'Returns false on invalid base64 string without crashing');
 
             window.history.pushState({}, '', '?state=' + btoa('not valid json'));
-            assert.strictEqual(loadStateFromURL(), false, 'Returns false on invalid JSON string without crashing');
+            assert.strictEqual(loadFromURL(), false, 'Returns false on invalid JSON string without crashing');
 
             const missingFieldsObj = { n: 3 };
             window.history.pushState({}, '', '?state=' + btoa(JSON.stringify(missingFieldsObj)));
-            assert.strictEqual(loadStateFromURL(), false, 'Returns false when required properties (start, effects) are missing');
+            assert.strictEqual(loadFromURL(), false, 'Returns false when required properties (start, effects) are missing');
         });
 
         QUnit.test('Correctly decodes valid state, applies it to game state, cleans URL, and renders UI updates', assert => {
@@ -945,10 +947,12 @@
 
             const replaceStateSpy = sinon.spy(window.history, 'replaceState');
 
+            const solveClickStub = sinon.stub(solveBtn, 'click');
+
             const originalIsMobile = gameState.isMobile;
             gameState.isMobile = true;
 
-            const result = loadStateFromURL();
+            const result = loadFromURL();
 
             assert.strictEqual(result, true, 'Returns true for a successfully parsed and applied state');
             assert.strictEqual(Number(countInput.value), 2, 'Updates countInput.value to match the configured state count');
@@ -982,7 +986,6 @@
                 'Pin 2 transform is successfully updated to PIN_MIDDLE (-5px) height since it is not at offset 0'
             );
 
-            // --- Inspector Row DOM Verifications ---
             assert.strictEqual(inspectorRow.children.length, 8, 'renderInspectorRow appends exactly MAX_PLATES (8) buttons to the inspector row');
 
             assert.ok(inspectorRow.children[0].classList.contains('inspect-btn'), 'First element correctly receives the inspect-btn class');
@@ -1010,8 +1013,63 @@
             const newUrl = replaceStateSpy.firstCall.args[2];
             assert.notOk(newUrl.includes('state='), 'The state query parameter is permanently stripped from the newly replaced URL');
 
+            assert.ok(solveClickStub.calledOnce, 'solveBtn.click() was successfully triggered by loadFromURL');
+
             replaceStateSpy.restore();
+            solveClickStub.restore();
             gameState.isMobile = originalIsMobile;
+        });
+
+        QUnit.test('shareBtn correctly prioritizes cached initialSolveSetup over live state during a sequence', assert => {
+            countInput.value = 2;
+            renderBlocks();
+
+            gameState.blocks[0].x = 1 * HOLE_SPACING;
+            gameState.blocks[1].x = -1 * HOLE_SPACING;
+
+            const clipboardStub = sinon.stub(navigator.clipboard, 'writeText').resolves();
+
+            shareBtn.click();
+            assert.ok(clipboardStub.calledOnce, 'Share button successfully triggered clipboard writeText');
+
+            let sharedUrl = new URL(clipboardStub.getCall(0).args[0]);
+            let sharedState = JSON.parse(atob(sharedUrl.searchParams.get('state')));
+
+            assert.deepEqual(
+                sharedState.start,
+                [1, -1],
+                'Phase 1: Without an active sequence, sharing falls back to the current live state [1, -1]'
+            );
+
+            solveBtn.click();
+            assert.ok(initialSolveSetup, 'initialSolveSetup is successfully populated immediately after clicking solveBtn');
+
+            gameState.blocks[0].x = 2 * HOLE_SPACING;
+
+            shareBtn.click();
+            sharedUrl = new URL(clipboardStub.getCall(1).args[0]);
+            sharedState = JSON.parse(atob(sharedUrl.searchParams.get('state')));
+
+            assert.deepEqual(
+                sharedState.start,
+                [1, -1],
+                'Phase 2: During an active sequence, sharing strictly prioritizes the cached state [1, -1], ignoring the live altered state [2, -1]'
+            );
+
+            clearSolutionUI();
+            assert.strictEqual(initialSolveSetup, null, 'initialSolveSetup is completely wiped back to null upon clearing the UI');
+
+            shareBtn.click();
+            sharedUrl = new URL(clipboardStub.getCall(2).args[0]);
+            sharedState = JSON.parse(atob(sharedUrl.searchParams.get('state')));
+
+            assert.deepEqual(
+                sharedState.start,
+                [2, -1],
+                'Phase 3: After clearing the sequence, sharing correctly falls back to generating from the new live state [2, -1]'
+            );
+
+            clipboardStub.restore();
         });
     });
 
