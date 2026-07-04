@@ -43,7 +43,8 @@ const lock = document.getElementById('lock'),
     solutionList = document.getElementById('solutionList'),
     expandBtn = document.getElementById('expandBtn'),
     inspectorRow = document.getElementById('inspectorRow'),
-    shareBtn = document.getElementById('shareBtn');
+    shareBtn = document.getElementById('shareBtn'),
+    steamGuideBtn = document.getElementById('steamGuideBtn');
 
 const
     PIN_RAISED = -10,

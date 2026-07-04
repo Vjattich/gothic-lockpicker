@@ -3,6 +3,7 @@ const
     tutorialBubble = document.getElementById('tutorialBubble'),
     tutorialText = document.getElementById('tutorialText'),
     tutorialArrow = document.getElementById('tutorialArrow'),
+    tutorialArrow2 = document.getElementById('tutorialArrow2'),
     questionMarkBtn = document.querySelector('.question-mark'),
     iconQm = document.getElementById('icon-qm'),
     iconX = document.getElementById('icon-x'),
@@ -46,12 +47,12 @@ questionMarkBtn.addEventListener('click', () => {
     }
 });
 
-function positionArrowRelative(target, offsetX = 0, offsetY = 0) {
+function positionArrowRelative(target, offsetX = 0, offsetY = 0, arrowElement = tutorialArrow) {
     if (!target) return;
     const rect = target.getBoundingClientRect();
-    tutorialArrow.style.top = `${rect.top + offsetY}px`;
-    tutorialArrow.style.left = `${rect.left + offsetX}px`;
-    tutorialArrow.style.display = 'block';
+    arrowElement.style.top = `${rect.top + offsetY}px`;
+    arrowElement.style.left = `${rect.left + offsetX}px`;
+    arrowElement.style.display = 'block';
 }
 
 guidePrev.addEventListener('click', () => {
@@ -97,6 +98,7 @@ function endTutorial() {
     tutorialOverlay.style.display = 'none';
     tutorialBubble.style.display = 'none';
     tutorialArrow.style.display = 'none';
+    tutorialArrow2.style.display = 'none'
     guidePrev.style.display = 'none';
     guideNext.style.display = 'none';
     iconQm.style.display = 'block';
@@ -115,6 +117,7 @@ function endTutorial() {
 
 function clean() {
     tutorialArrow.style.display = 'none';
+    tutorialArrow2.style.display = 'none';
 
     clearSolutionUI();
     clearHoverPreview();
@@ -447,6 +450,7 @@ async function runTutorialStep(version) {
         tutorialText.textContent = 'You can share your current lock with others by pressing the share button. Better if u share it in steam guide with comment where it stands for feature database';
         while (version === currentTutorialVersion) {
             positionArrowRelative(shareBtn, 15, -40);
+            positionArrowRelative(steamGuideBtn, 15, -40, tutorialArrow2);
             await stepSleep(2000);
         }
     } else {
