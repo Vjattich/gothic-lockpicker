@@ -104,6 +104,7 @@ const
 
 const gameState = {
         isInteracted: false,
+        isRender: false,
         blocks: [],
         activeLinkerId: null,
         dragState: {
@@ -494,7 +495,8 @@ function updateSinglePinMove(b, outTime) {
 }
 
 function updatePinState(block, options = {}) {
-    if (false === gameState.isInteracted) {
+
+    if (false === gameState.isInteracted && false === gameState.isRender) {
         return;
     }
 
@@ -640,6 +642,7 @@ function loadStateFromURL() {
         const stateObj = JSON.parse(atob(stateParam));
         if (!stateObj.n || !stateObj.start || !stateObj.effects) return false;
 
+        gameState.isRender = true;
         countInput.value = stateObj.n;
         gameState.blocks = [];
         renderBlocks();
@@ -656,6 +659,8 @@ function loadStateFromURL() {
             updateBlockState(b, { x: b.x });
         }
 
+        renderInspectorRow()
+
         const cleanUrl = new URL(window.location.href);
         cleanUrl.searchParams.delete('state');
         window.history.replaceState({}, document.title, cleanUrl.toString());
@@ -663,6 +668,8 @@ function loadStateFromURL() {
     } catch (e) {
         console.error("Failed to load shared state:", e);
         return false;
+    } finally {
+        gameState.isRender = false
     }
 }
 
