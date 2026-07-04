@@ -83,20 +83,17 @@
         QUnit.test('solve() correctly handles pathfinding and edge cases', assert => {
             const defaultTimeout = 1000;
 
-            // Given an immediate goal state
             let result = solve(2, [0, 0], [[0, 0], [0, 0]], 'shortest-fast', defaultTimeout);
             assert.deepEqual(result.moves, [], 'Returns empty moves array if already at goal state');
             assert.deepEqual(result.states, [[0, 0]], 'Returns only the initial state in the states array');
 
-            // Given a simple one-step puzzle
             result = solve(1, [-1], [[]], 'shortest-fast', defaultTimeout);
             assert.strictEqual(result.moves.length, 1, 'Solves a simple 1-step puzzle');
             assert.deepEqual(result.moves[0], {plate: 1, direction: 'right'}, 'Identifies the correct single move');
 
-            // Given linked plates that move together
             const start = [-1, -1];
             const effects = [
-                [0, 1], // Plate 1 moves Plate 2 in the same direction
+                [0, 1],
                 [0, 0]
             ];
             result = solve(2, start, effects, 'shortest-fast', defaultTimeout);
@@ -104,7 +101,6 @@
             assert.deepEqual(result.moves[0], {plate: 1, direction: 'right'}, 'Moving the master plate solves both');
             assert.deepEqual(result.states, [[-1, -1], [0, 0]], 'Records the correct state progression');
 
-            // Given a timeout condition
             result = solve(2, [2, 2], [[0, 0], [0, 0]], 'shortest-fast', -1);
             assert.ok(result.timeout, 'Returns a timeout flag if calculation exceeds timeoutMs limit');
         });
@@ -197,7 +193,7 @@
             assert.ok(block.pin.style.transform.includes(String(PIN_UNDER)), 'Pin is instantly pushed to PIN_UNDER immediately after applySingleMove is called');
             assert.ok(block.pinWrapper.style.transform.includes(`translateX(${-HOLE_SPACING}px)`), 'pinWrapper instantly translates in opposite direction of the plate to stay fixed over the hole');
 
-            clock.tick(250); // Instantly fast-forwards time by 250ms
+            clock.tick(250);
 
             assert.ok(block.pin.style.transform.includes(String(PIN_MIDDLE)), 'Pin evaluates new position and springs up to PIN_MIDDLE after the 200ms timeout');
         });
@@ -741,16 +737,13 @@
         let originalJumpToStep;
 
         hooks.beforeEach(() => {
-            // Use fake timers to instantly test the 250ms glow timeout
             clock = sinon.useFakeTimers();
 
-            // 1. Reset Global State Variables to defaults
             currentSolution = null;
             currentStepIndex = 0;
             isPlaying = false;
             moveMap = [];
 
-            // 2. Clean up the actual DOM Elements (populated by setupTestEnvironment)
             prevBtn.disabled = false;
             nextBtn.disabled = false;
             playBtn.disabled = false;
@@ -759,7 +752,6 @@
             solutionList.innerHTML = '';
             squashMovesCheck.checked = false;
 
-            // 3. Clean up actual gameState Blocks and Holes to a pristine state
             setUpThreeBlocks();
 
             originalScrollIntoView = HTMLElement.prototype.scrollIntoView;
@@ -837,7 +829,6 @@
                 { plate: gameState.blocks[1].id, direction: 'left' }
             ];
 
-            // State: At the beginning, not playing
             currentStepIndex = 0;
             isPlaying = false;
             updatePlaybackUI();
@@ -847,7 +838,6 @@
             assert.notOk(playBtn.disabled, 'Play button enabled at start');
             assert.notOk(restartSeqBtn.disabled, 'Restart button enabled');
 
-            // State: In the middle, playing
             currentStepIndex = 1;
             isPlaying = true;
             updatePlaybackUI();
@@ -857,7 +847,6 @@
             assert.ok(solveBtn.disabled, 'Solve button disabled while playing');
             assert.ok(restartSeqBtn.disabled, 'Restart button disabled while playing');
 
-            // State: At the end, not playing
             currentStepIndex = 2;
             isPlaying = false;
             updatePlaybackUI();
@@ -909,6 +898,70 @@
         });
     });
 
+    QUnit.module('Lockpicker Game Logic - URL State Decoding (loadStateFromURL)', hooks => {
+        let originalReplaceState;
+
+        hooks.beforeEach(() => {
+            originalReplaceState = window.history.replaceState;
+            window.history.pushState({}, '', window.location.pathname);
+            setUpThreeBlocks();
+        });
+
+        hooks.afterEach(() => {
+            window.history.replaceState = originalReplaceState;
+            window.history.pushState({}, '', window.location.pathname);
+            sinon.restore();
+        });
+
+        QUnit.test('Returns false when no state parameter is present in URL', assert => {
+            assert.strictEqual(loadStateFromURL(), false, 'Returns false when there is no state param');
+        });
+
+        QUnit.test('Returns false and handles gracefully when state parameter is invalid', assert => {
+            window.history.pushState({}, '', '?state=INVALID_BASE_64_&&&');
+            assert.strictEqual(loadStateFromURL(), false, 'Returns false on invalid base64 string without crashing');
+
+            window.history.pushState({}, '', '?state=' + btoa('not valid json'));
+            assert.strictEqual(loadStateFromURL(), false, 'Returns false on invalid JSON string without crashing');
+
+            const missingFieldsObj = { n: 3 };
+            window.history.pushState({}, '', '?state=' + btoa(JSON.stringify(missingFieldsObj)));
+            assert.strictEqual(loadStateFromURL(), false, 'Returns false when required properties (start, effects) are missing');
+        });
+
+        QUnit.test('Correctly decodes valid state, applies it to game state, and cleans URL', assert => {
+            const validState = {
+                n: 2,
+                start: [1, -1],
+                effects: [
+                    [0, 1],
+                    [-1, 0],
+                ]
+            };
+
+            const encodedState = btoa(JSON.stringify(validState));
+            window.history.pushState({}, '', '?state=' + encodedState);
+
+            const replaceStateSpy = sinon.spy(window.history, 'replaceState');
+
+            const result = loadStateFromURL();
+
+            assert.strictEqual(result, true, 'Returns true for a successfully parsed and applied state');
+            assert.strictEqual(Number(countInput.value), 2, 'Updates countInput.value to match the configured state count');
+            assert.strictEqual(gameState.blocks.length, 2, 'Renders the exact number of blocks parsed from state');
+
+            assert.strictEqual(gameState.blocks[0].x, 1 * HOLE_SPACING, 'Correctly translates start offset to exact X coordinate for Block 1');
+            assert.strictEqual(gameState.blocks[1].x, -1 * HOLE_SPACING, 'Correctly translates start offset to exact X coordinate for Block 2');
+
+            assert.strictEqual(gameState.blocks[0].group[2], 1, 'Restores forward link relationship on Block 1 targeting Block 2');
+            assert.strictEqual(gameState.blocks[1].group[1], -1, 'Restores reverse link relationship on Block 2 targeting Block 1');
+
+            assert.ok(replaceStateSpy.calledOnce, 'window.history.replaceState is triggered to clean up the URL');
+            const newUrl = replaceStateSpy.firstCall.args[2];
+            assert.notOk(newUrl.includes('state='), 'The state query parameter is permanently stripped from the newly replaced URL');
+        });
+    });
+
     //Should be run last one. Cuz of timers
     QUnit.module('Lockpicker Game Logic - Long Press', hooks => {
         let clock;
@@ -925,8 +978,8 @@
         });
 
         QUnit.test('cycles through link states on target blocks', async assert => {
-            const masterBlock = gameState.blocks[0]; // id 1
-            const targetBlock = gameState.blocks[1]; // id 2
+            const masterBlock = gameState.blocks[0];
+            const targetBlock = gameState.blocks[1];
 
             gameState.activeLinkerId = 1;
             gameState.dragState.activePlate = targetBlock.el;
@@ -967,7 +1020,6 @@
 
             await clock.tickAsync(SHORT_PRESS_DURATION + 1);
 
-            // 3. Assert: Deselection logic successfully triggered
             assert.equal(gameState.activeLinkerId, null, 'Remove linker');
             assert.notOk(masterBlock.el.classList.contains('selected'), 'Removes selected');
 
@@ -976,8 +1028,8 @@
         });
 
         QUnit.test('deselect finger still on plate (Mobile)', async assert => {
-            const masterBlock = gameState.blocks[0]; // id 1
-            const targetBlock = gameState.blocks[1]; // id 2
+            const masterBlock = gameState.blocks[0];
+            const targetBlock = gameState.blocks[1];
 
             masterBlock.group[2] = 1;
 
