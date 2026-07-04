@@ -84,6 +84,7 @@ async function runTutorialStep(version) {
     function clean() {
         tutorialArrow.style.display = 'none';
 
+        clearHoverPreview();
         gameState.blocks.filter(b => b.x !== 0).forEach(b => {
             b.el.classList.remove(UI_CLASSES.SELECTED, UI_CLASSES.LINKED, UI_CLASSES.RINKED, UI_CLASSES.TOUCHED);
             b.el.querySelector('.front-face').style.borderColor = '';
