@@ -114,7 +114,7 @@ const gameState = {
             longPressTimer: null,
             hasMoved: false,
         },
-        isMobile: 768 >= window.innerWidth,
+        isMobile: false,
         lastTouchTime: 0,
         lastAction: null,
         isHovering: false,
@@ -124,6 +124,7 @@ const gameState = {
     pinchState = {initialDistance: 0, initialScale: 0, lastScale: 0};
 
 function setInitialState() {
+    gameState.isMobile = 768 >= window.innerWidth;
     pinchState.initialScale = gameState.isMobile
         ? Math.max(0.3, Math.min((window.innerWidth - 140) / 340, 1))
         : 1.4;
@@ -136,6 +137,11 @@ function setInitialState() {
 }
 
 setInitialState();
+
+window.addEventListener('resize', () => {
+    setInitialState();
+    renderBlocks();
+});
 
 if (gameState.isMobile) squashMovesCheck.checked = false;
 
