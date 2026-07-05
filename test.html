@@ -1032,8 +1032,8 @@
             shareBtn.click();
             assert.ok(clipboardStub.calledOnce, 'Share button successfully triggered clipboard writeText');
 
-            let sharedUrl = new URL(clipboardStub.getCall(0).args[0]);
-            let sharedState = JSON.parse(atob(sharedUrl.searchParams.get('state')));
+            let sharedUrl = new URL(clipboardStub.getCall(0).args[0]),
+                sharedState = JSON.parse(atob(sharedUrl.searchParams.get('state')));
 
             assert.deepEqual(
                 sharedState.start,
