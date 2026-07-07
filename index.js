@@ -13,7 +13,8 @@ const UI_CLASSES = {
     INSPECT_BTN: 'inspect-btn',
     PLATE: 'plate',
     HOLE: 'hole',
-    ZOOMING: 'is-zooming'
+    ZOOMING: 'is-zooming',
+    DRAGGING: 'is-dragging'
 };
 
 const ACTIONS = {
@@ -132,16 +133,19 @@ function setInitialState() {
     pinchState.lastScale = pinchState.initialScale;
     sizeInput.value = pinchState.initialScale;
     document.documentElement.style.setProperty('--block-scale', pinchState.initialScale);
-    if (navigator.getGamepads) {
-        let gamepads = navigator.getGamepads();
-    }
 }
 
 setInitialState();
 
+//antifreez
+let resizeTimer = null;
 window.addEventListener('resize', () => {
-    setInitialState();
-    renderBlocks();
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(() => {
+        const wasMobile = gameState.isMobile;
+        setInitialState();
+        if (wasMobile !== gameState.isMobile) renderBlocks();
+    }, 150);
 });
 
 if (gameState.isMobile) squashMovesCheck.checked = false;
@@ -187,6 +191,7 @@ function clearSolutionUI() {
     gameState.glowingHoles = [];
 
     solutionList.innerHTML = '';
+    lastActiveStepEl = null;
     if (solutionList.classList.contains(UI_CLASSES.EXPANDED)) toggleExpandList(false);
 }
 
@@ -242,15 +247,44 @@ const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 function jumpToStep(targetIndex) {
     targetIndex = targetIndex - 1;
     if (null === currentSolution || isPlaying) return;
+
+    const targetX = gameState.blocks.map(b => b.x);
+
+    const simulate = (move, reverse) => {
+        const
+            primaryBlock = gameState.blocks[move.plate - 1],
+            stepShift = ('left' === move.direction) === reverse ? HOLE_SPACING : -HOLE_SPACING;
+        for (const i in primaryBlock.group) {
+            const id = +i;
+            if (!gameState.blocks[id - 1]) continue;
+            targetX[id - 1] = Math.max(-MAX_BOUND, Math.min(MAX_BOUND, targetX[id - 1] + stepShift * primaryBlock.group[id]));
+        }
+    };
+
     while (currentStepIndex < targetIndex) {
-        applySingleMove(currentSolution[currentStepIndex], false);
+        simulate(currentSolution[currentStepIndex], false);
         currentStepIndex++;
     }
     while (currentStepIndex > targetIndex) {
-        applySingleMove(currentSolution[currentStepIndex - 1], true);
+        simulate(currentSolution[currentStepIndex - 1], true);
         currentStepIndex--;
     }
+
+    gameState.blocks.forEach((b, i) => {
+        if (b.x === targetX[i]) return;
+        updateBlockState(b, { x: targetX[i], transition: 'transform 0.2s ease-out', pinTime: 200 });
+    });
+
     updatePlaybackUI();
+}
+
+let lastActiveStepEl = null;
+
+function setActiveStep(el) {
+    if (lastActiveStepEl === el) return;
+    if (lastActiveStepEl) lastActiveStepEl.classList.remove(UI_CLASSES.ACTIVE_STEP);
+    if (el) el.classList.add(UI_CLASSES.ACTIVE_STEP);
+    lastActiveStepEl = el;
 }
 
 function updatePlaybackUI() {
@@ -262,18 +296,19 @@ function updatePlaybackUI() {
     restartSeqBtn.disabled = isPlaying;
     solveBtn.disabled = isPlaying;
 
-    Array.from(solutionList.children).forEach(el => el.classList.remove(UI_CLASSES.ACTIVE_STEP));
+    const scrollBehavior = isPlaying ? 'auto' : 'smooth';
+
     gameState.blocks.forEach(b => b.el.classList.remove(UI_CLASSES.TOUCHED, UI_CLASSES.SELECTED, UI_CLASSES.LINKED, UI_CLASSES.RINKED));
 
     if (currentStepIndex < currentSolution.length) {
         let activeDomIndex = moveMap[currentStepIndex];
         if (undefined !== activeDomIndex && solutionList.children[activeDomIndex]) {
             let activeEl = solutionList.children[activeDomIndex];
-            activeEl.classList.add(UI_CLASSES.ACTIVE_STEP);
+            setActiveStep(activeEl);
             if (0 === currentStepIndex) {
                 solutionList.scrollTop = 0;
             } else {
-                activeEl.scrollIntoView({behavior: 'smooth', block: 'nearest'});
+                activeEl.scrollIntoView({behavior: scrollBehavior, block: 'nearest'});
             }
         }
 
@@ -345,7 +380,7 @@ function updatePlaybackUI() {
         });
         let lastDomIndex = moveMap[currentSolution.length - 1];
         if (undefined !== lastDomIndex && solutionList.children[lastDomIndex]) {
-            solutionList.children[lastDomIndex].classList.add(UI_CLASSES.ACTIVE_STEP);
+            setActiveStep(solutionList.children[lastDomIndex]);
             solutionList.children[lastDomIndex].scrollIntoView({behavior: 'smooth', block: 'nearest'});
         }
     }
@@ -353,7 +388,7 @@ function updatePlaybackUI() {
 
 function renderSolutionList() {
     if (null === currentSolution) return;
-    solutionList.innerHTML = '';
+    lastActiveStepEl = null;
     moveMap = [];
     let movesToRender = [];
     let domIndex = 0;
@@ -374,6 +409,7 @@ function renderSolutionList() {
         movesToRender.push({...m, count: 1, targetIndex: i + 1});
         moveMap[i] = i;
     });
+    const fragment = document.createDocumentFragment();
     movesToRender.forEach((m, index) => {
         const step = document.createElement('div');
         const icon = 'left' === m.direction ? '←' : '→';
@@ -381,13 +417,17 @@ function renderSolutionList() {
         if (1 < m.count) text += ` (x${m.count})`;
         step.textContent = text;
         step.style.cursor = 'pointer';
-        step.addEventListener('click', () => jumpToStep(m.targetIndex));
-        solutionList.appendChild(step);
+        step.dataset.target = m.targetIndex;
+        fragment.appendChild(step);
     });
+    solutionList.replaceChildren(fragment);
     updatePlaybackUI();
 }
 
-squashMovesCheck.addEventListener('change', renderSolutionList);
+solutionList.addEventListener('click', (e) => {
+    const step = e.target.closest('[data-target]');
+    if (step) jumpToStep(+step.dataset.target);
+});
 
 solveBtn.addEventListener('click', async () => {
     const setup = compactSetup();
@@ -782,30 +822,20 @@ function toggleExpandList(forceState) {
             availableHeight = window.innerHeight - rect.top - bottomPadding - 45;
         solutionList.style.height = `${availableHeight}px`;
         solutionList.style.maxHeight = `${availableHeight}px`;
-        setTimeout(() => {
-            solutionList.style.scrollBehavior = 'auto';
-            if (currentStepIndex === 0) {
-                solutionList.scrollTop = 0;
-            } else {
-                const activeStep = solutionList.querySelector(`.${UI_CLASSES.ACTIVE_STEP}`);
-                if (activeStep) activeStep.scrollIntoView({behavior: 'auto', block: 'nearest'});
-            }
-            setTimeout(() => solutionList.style.scrollBehavior = 'smooth', 50);
-        }, 310);
     } else {
         solutionList.style.height = '';
         solutionList.style.maxHeight = '';
-        setTimeout(() => {
-            solutionList.style.scrollBehavior = 'auto';
-            if (currentStepIndex === 0) {
-                solutionList.scrollTop = 0;
-            } else {
-                const activeStep = solutionList.querySelector(`.${UI_CLASSES.ACTIVE_STEP}`);
-                if (activeStep) activeStep.scrollIntoView({behavior: 'auto', block: 'nearest'});
-            }
-            setTimeout(() => solutionList.style.scrollBehavior = 'smooth', 50);
-        }, 310);
     }
+
+    setTimeout(() => {
+        solutionList.style.scrollBehavior = 'auto';
+        if (0 === currentStepIndex) {
+            solutionList.scrollTop = 0;
+        } else if (lastActiveStepEl) {
+            lastActiveStepEl.scrollIntoView({behavior: 'auto', block: 'nearest'});
+        }
+        setTimeout(() => solutionList.style.scrollBehavior = 'smooth', 50);
+    }, 310);
 }
 
 expandBtn.addEventListener('click', () => toggleExpandList());
@@ -920,7 +950,7 @@ function updateDragDOM() {
     if (!dragState.isDragging) return;
 
     const
-        scale = pinchState.lastScale || parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--block-scale')),
+        scale = dragState.scale || 1,
         rawDeltaX = rawDistX / scale,
         deltaX = Math.max(dragState.minDeltaX, Math.min(rawDeltaX, dragState.maxDeltaX));
 
@@ -972,6 +1002,9 @@ function handleDragStart(e) {
     dragState.startInputX = getClientX(e);
     dragState.isDragging = false;
     dragState.movingGroup.length = 0;
+    dragState.scale = pinchState.lastScale
+        || parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--block-scale'))
+        || 1;
 
     updateHoverPreview(clickedPlate);
 
@@ -1007,6 +1040,7 @@ function handleDragStart(e) {
 
     dragState.minDeltaX = minD;
     dragState.maxDeltaX = maxD;
+    document.body.classList.add(UI_CLASSES.DRAGGING);
     gameState.lastAction = ACTIONS.DRAG_START;
     longPress(clickedId);
 }
@@ -1102,6 +1136,7 @@ function handleDragEnd(e) {
     dragState.activePlate = null;
     dragState.movingGroup.length = 0;
     dragState.isDragging = false;
+    document.body.classList.remove(UI_CLASSES.DRAGGING);
 
     if (ACTIONS.DESELECT_DRAG_END !== gameState.lastAction) {
         gameState.lastAction = ACTIONS.DRAG_END;
@@ -1209,33 +1244,19 @@ function setupLongPress(button, stepFunction) {
 
 function renderInspectorRow() {
     if (!inspectorRow || !gameState.isMobile) return;
-    inspectorRow.innerHTML = '';
-    let assignedColors = {};
-    let colorIndex = 0;
-    gameState.blocks.forEach(block => {
-        const groupIds = Object.keys(block.group).sort();
-        if (groupIds.length > 1) {
-            const groupSignature = groupIds.join('-');
-            if (!assignedColors[groupSignature]) {
-                assignedColors[groupSignature] = '#66d437';
-                colorIndex++;
-            }
-        }
-    });
+    const GROUP_COLOR = '#66d437';
+    const fragment = document.createDocumentFragment();
     for (let i = 0; i < MAX_PLATES; i++) {
         const btn = document.createElement('button');
         btn.className = UI_CLASSES.INSPECT_BTN;
         btn.textContent = i + 1;
         if (i < gameState.blocks.length) {
             const block = gameState.blocks[i];
-            const groupIds = Object.keys(block.group).sort();
             let defaultBg = '';
-            if (groupIds.length > 1) {
-                const groupSignature = groupIds.join('-');
-                const gColor = assignedColors[groupSignature];
-                btn.style.borderColor = gColor;
-                btn.style.color = gColor;
-                defaultBg = `${gColor}22`;
+            if (Object.keys(block.group).length > 1) {
+                btn.style.borderColor = GROUP_COLOR;
+                btn.style.color = GROUP_COLOR;
+                defaultBg = `${GROUP_COLOR}22`;
             }
             btn.blockEl = block.el;
             btn.dataset.defaultBg = defaultBg;
@@ -1252,8 +1273,9 @@ function renderInspectorRow() {
             btn.classList.add(UI_CLASSES.DISABLED_BTN);
             btn.addEventListener('touchstart', (e) => e.preventDefault(), {passive: false});
         }
-        inspectorRow.appendChild(btn);
+        fragment.appendChild(btn);
     }
+    inspectorRow.replaceChildren(fragment);
 }
 
 window.currentHoveredBtn = null;
@@ -1323,4 +1345,3 @@ shareBtn.addEventListener('click', () => {
         setStatus('Failed to copy link.', 'error');
     });
 });
-
