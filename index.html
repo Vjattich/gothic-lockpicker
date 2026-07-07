@@ -823,13 +823,13 @@
                 transition: min-height 0.4s ease-out, border-radius 0.4s ease-out;
             }
 
-            .controls:has(.step-controls-row.show-stretch) {
+            body:not(.tutorial-active) .controls:has(.step-controls-row.show-stretch) {
                 min-height: 35%;
                 border-bottom-left-radius: 0;
                 border-bottom-right-radius: 0;
             }
 
-            body:has(.step-controls-row.show-stretch) footer {
+            body:not(.tutorial-active):has(.step-controls-row.show-stretch) footer {
                 opacity: 0;
                 pointer-events: none;
             }
