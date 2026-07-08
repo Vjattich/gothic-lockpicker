@@ -73,6 +73,7 @@ guideNext.addEventListener('click', () => {
 
 function startTutorial() {
     isGuideActive = true;
+    document.body.classList.add('tutorial-active');
     resetBtn.click();
     tutorialOverlay.style.display = 'block';
     tutorialBubble.style.display = 'block';
@@ -93,6 +94,7 @@ function startTutorial() {
 
 function endTutorial() {
     isGuideActive = false;
+    document.body.classList.remove('tutorial-active');
     currentTutorialVersion++;
     wakeUpSleep();
     tutorialOverlay.style.display = 'none';

@@ -10,26 +10,35 @@
 <script src="https://cdn.jsdelivr.net/npm/sinon@22.0.0/pkg/sinon.min.js"></script>
 <div id="mock-ui" style="display:none;"></div>
 <script>
-    // 1. Fetch the production HTML
+
     async function setupTestEnvironment() {
-        const response = await fetch('index.html');
-        const htmlText = await response.text();
-
-        // 2. Parse it into a virtual DOM
-        const prodDoc = new DOMParser().parseFromString(htmlText, 'text/html');
-
-        // 3. Extract the parts you need (e.g., the controls and the lock)
-        // and inject them into our hidden mock-ui div
-        document.getElementById('mock-ui').innerHTML = prodDoc.body.innerHTML;
-
-        // 4. NOW load index.js dynamically.
-        // We must do this after injection, or index.js will crash looking for null elements.
-        const script = document.createElement('script');
-        script.src = 'index.js';
-        script.onload = () => {
+        const fail = (message) => {
+            QUnit.module('Bootstrap');
+            QUnit.test('test environment loaded', assert => {
+                assert.ok(false, message);
+            });
             QUnit.start();
         };
-        document.body.appendChild(script);
+
+        let htmlText;
+        try {
+            const response = await fetch('index.html');
+            if (!response.ok) throw new Error('HTTP ' + response.status);
+            htmlText = await response.text();
+        } catch (err) {
+            fail('Could not fetch index.html (serve the folder over http): ' + err.message);
+            return;
+        }
+
+        const prodDoc = new DOMParser().parseFromString(htmlText, 'text/html');
+        document.getElementById('mock-ui').innerHTML = prodDoc.body.innerHTML;
+
+        const script_1 = document.createElement('script');
+        script_1.src = 'index.js';
+        script_1.onload = () => QUnit.start();
+        script_1.onerror = () => fail('Failed to load index.js');
+        document.body.appendChild(script_1);
+
     }
 
     QUnit.config.autostart = false;
@@ -44,65 +53,133 @@
         hasMoved: false,
     });
 
+    const getTranslateX = (elOrTransform) => {
+        const t = typeof elOrTransform === 'string'
+            ? elOrTransform
+            : (elOrTransform && elOrTransform.style ? elOrTransform.style.transform : '') || '';
+        const m = /translateX\(\s*(-?\d*\.?\d+)px\s*\)/.exec(t);
+        return m ? Number(m[1]) : 0;
+    };
+
+    const resetPlaybackState = () => {
+        playback.solution = null;
+        playback.stepIndex = 0;
+        playback.isPlaying = false;
+        playback.moveMap = [];
+        playback.initialSetup = null;
+        playback.lastActiveStepEl = null;
+    };
+
     const setUpThreeBlocks = () => {
         countInput.value = 3;
         renderBlocks();
         gameState.blocks.forEach((block) => {
             block.x = 0;
-            block.group = { [block.id]: 1 };
+            block.group = {[block.id]: 1};
         });
         clearSolutionUI();
     };
 
-    const nextFrame = (clock) => new Promise(resolve => {
-        requestAnimationFrame(resolve);
-        if (clock) clock.tick(16);
-    });
+    //one frame spik
+    const nextFrame = async (clock) => {
+        if (clock && typeof clock.tickAsync === 'function') {
+            await clock.tickAsync(16);
+        } else {
+            await new Promise(resolve => requestAnimationFrame(resolve));
+        }
+    };
 
-    QUnit.module('Solver Algorithm', hooks => {
+    QUnit.module('Solver Algorithm (solve)', () => {
+        const MODES = ['shortest', 'shortest-fast', 'fewer-switches', 'fewer-switches-fast'];
 
-        QUnit.test('isGoal() evaluates the target state correctly', assert => {
-            assert.ok(isGoal([0, 0, 0]), 'Returns true when all plates are at position 0');
-            assert.notOk(isGoal([0, 1, 0]), 'Returns false when any plate is non-zero');
-            assert.notOk(isGoal([-1, 0]), 'Returns false for negative offsets');
+        QUnit.test('returns an empty solution when the start is already the goal', assert => {
+            MODES.forEach(mode => {
+                const result = solve(3, [0, 0, 0], [[0, 0, 0], [0, 0, 0], [0, 0, 0]], mode, 1000);
+                assert.deepEqual(result.moves, [], `No moves are emitted for an already-solved state (${mode})`);
+                assert.deepEqual(result.states, [[0, 0, 0]], `Only the initial state is returned (${mode})`);
+            });
         });
 
-        QUnit.test('applyMove() computes moves and relational effects while enforcing bounds', assert => {
-            const effects = [
-                [0, 1, -1],
-                [0, 0, 0],
-                [0, 0, 0]
-            ];
+        QUnit.test('solves single-plate puzzles in the correct direction', assert => {
+            assert.deepEqual(
+                solve(1, [-1], [[0]], 'shortest-fast', 1000).moves,
+                [{plate: 1, direction: 'right'}],
+                'A plate at -1 is moved right once to reach 0'
+            );
+            assert.deepEqual(
+                solve(1, [1], [[0]], 'shortest-fast', 1000).moves,
+                [{plate: 1, direction: 'left'}],
+                'A plate at +1 is moved left once to reach 0'
+            );
 
-            assert.deepEqual(applyMove([0, 0, 0], 2, 'right', effects), [0, 1, 0], 'Moves specified plate correctly without side effects');
-            assert.deepEqual(applyMove([0, 0, 0], 1, 'right', effects), [1, 1, -1], 'Applies relational effects (positive and negative) to linked plates');
-            assert.strictEqual(applyMove([3, 0], 1, 'right', [[0, 0], [0, 0]]), null, 'Returns null if a move forces a plate beyond MAX bound (3)');
-            assert.strictEqual(applyMove([-3, 0], 1, 'left', [[0, 0], [0, 0]]), null, 'Returns null if a move forces a plate beyond MIN bound (-3)');
+            const twoStep = solve(1, [2], [[0]], 'shortest-fast', 1000);
+            assert.deepEqual(twoStep.moves, [{plate: 1, direction: 'left'}, {
+                plate: 1,
+                direction: 'left'
+            }], 'A plate at +2 takes two left moves');
+            assert.deepEqual(twoStep.states, [[2], [1], [0]], 'States record every intermediate position');
         });
 
-        QUnit.test('solve() correctly handles pathfinding and edge cases', assert => {
-            const defaultTimeout = 1000;
+        QUnit.test('applies forward and reverse linked effects in a single move', assert => {
+            const forward = solve(2, [-1, -1], [[0, 1], [0, 0]], 'shortest-fast', 1000);
+            assert.deepEqual(forward.moves, [{
+                plate: 1,
+                direction: 'right'
+            }], 'A forward link (+1) drags the linked plate the same way, solving both at once');
+            assert.deepEqual(forward.states, [[-1, -1], [0, 0]], 'Both plates land on the goal together');
 
-            let result = solve(2, [0, 0], [[0, 0], [0, 0]], 'shortest-fast', defaultTimeout);
-            assert.deepEqual(result.moves, [], 'Returns empty moves array if already at goal state');
-            assert.deepEqual(result.states, [[0, 0]], 'Returns only the initial state in the states array');
+            const reverse = solve(2, [-1, 1], [[0, -1], [0, 0]], 'shortest-fast', 1000);
+            assert.deepEqual(reverse.moves, [{
+                plate: 1,
+                direction: 'right'
+            }], 'A reverse link (-1) drives the linked plate the opposite way, solving both at once');
+            assert.deepEqual(reverse.states, [[-1, 1], [0, 0]], 'Opposite motion still resolves both plates to 0');
+        });
 
-            result = solve(1, [-1], [[]], 'shortest-fast', defaultTimeout);
-            assert.strictEqual(result.moves.length, 1, 'Solves a simple 1-step puzzle');
-            assert.deepEqual(result.moves[0], {plate: 1, direction: 'right'}, 'Identifies the correct single move');
+        QUnit.test('finds a shortest path for a multi-move puzzle', assert => {
+            ['shortest', 'shortest-fast'].forEach(mode => {
+                const result = solve(2, [3, -3], [[0, 0], [0, 0]], mode, 3000);
+                assert.strictEqual(result.moves.length, 6, `Uses the minimal 6 moves (${mode})`);
+                assert.deepEqual(result.states[0], [3, -3], `The path starts at the given state (${mode})`);
+                assert.deepEqual(result.states[result.states.length - 1], [0, 0], `The path ends on the goal (${mode})`);
+            });
+        });
 
-            const start = [-1, -1];
-            const effects = [
-                [0, 1],
-                [0, 0]
-            ];
-            result = solve(2, start, effects, 'shortest-fast', defaultTimeout);
-            assert.strictEqual(result.moves.length, 1, 'Solves multi-plate puzzle in one move using linked effects');
-            assert.deepEqual(result.moves[0], {plate: 1, direction: 'right'}, 'Moving the master plate solves both');
-            assert.deepEqual(result.states, [[-1, -1], [0, 0]], 'Records the correct state progression');
+        QUnit.test('returns null when the goal is unreachable', assert => {
+            // Both plates are rigidly coupled (moving either shifts both the same
+            // way), so v1 - v2 is invariant. Starting at [0, 1] it can never
+            // become [0, 0], so every mode must report no solution.
+            MODES.forEach(mode => {
+                assert.strictEqual(solve(2, [0, 1], [[0, 1], [1, 0]], mode, 2000), null, `No solution is reported for an unreachable goal (${mode})`);
+            });
+        });
 
-            result = solve(2, [2, 2], [[0, 0], [0, 0]], 'shortest-fast', -1);
-            assert.ok(result.timeout, 'Returns a timeout flag if calculation exceeds timeoutMs limit');
+        QUnit.test('flags a timeout when the budget is exceeded', assert => {
+            // A large start far from the goal guarantees the search runs long
+            // enough to hit its periodic time check; a negative budget forces it.
+            MODES.forEach(mode => {
+                const result = solve(8, [3, 3, 3, 3, 3, 3, 3, 3], Array.from({length: 8}, () => new Array(8).fill(0)), mode, -1);
+                assert.ok(result && true === result.timeout, `Returns a timeout flag past the budget (${mode})`);
+            });
+        });
+
+        QUnit.test('validates its inputs', assert => {
+            assert.throws(() => solve(18, new Array(18).fill(0), [], 'shortest-fast', 1000), /17 plates/, 'Rejects more plates than the packing scheme supports');
+            assert.throws(() => solve(1, [4], [[0]], 'shortest-fast', 1000), /out of range/, 'Rejects a start above the maximum position');
+            assert.throws(() => solve(1, [-4], [[0]], 'shortest-fast', 1000), /out of range/, 'Rejects a start below the minimum position');
+        });
+
+        QUnit.test('routes every mode to a correct goal-reaching solution', assert => {
+            MODES.forEach(mode => {
+                const result = solve(3, [-1, 0, 1], [[0, 0, 0], [0, 0, 0], [0, 0, 0]], mode, 3000);
+                assert.deepEqual(result.states[0], [-1, 0, 1], `Solution begins at the start state (${mode})`);
+                assert.deepEqual(result.states[result.states.length - 1], [0, 0, 0], `Solution ends on the goal (${mode})`);
+                assert.ok(result.moves.length >= 2, `Solution is non-trivial (${mode})`);
+            });
+
+            ['shortest', 'shortest-fast'].forEach(mode => {
+                assert.strictEqual(solve(3, [-1, 0, 1], [[0, 0, 0], [0, 0, 0], [0, 0, 0]], mode, 3000).moves.length, 2, `Shortest modes use the minimal 2 moves (${mode})`);
+            });
         });
     });
 
@@ -141,6 +218,8 @@
         hooks.afterEach(() => {
             clock.restore();
             sinon.restore();
+            document.elementFromPoint = originalElementFromPoint;
+            document.body.classList.remove(UI_CLASSES.ZOOMING, UI_CLASSES.DRAGGING);
         });
 
         QUnit.test('Updates state correctly when NOT over any hole', assert => {
@@ -216,8 +295,7 @@
             assert.strictEqual(block.pin.dataset.wasOverHole, 'false', 'Pin evaluates as outside hole during drag halfway');
             assert.ok(block.pin.style.transform.includes(String(PIN_UNDER)), 'Pin is pushed to PIN_UNDER during the half move');
 
-            const s = block.el.style.transform.indexOf('X'),
-                x = -block.el.style.transform.substring(s + 2, block.el.style.transform.length - 3);
+            const x = -getTranslateX(block.el);
             assert.ok(block.pinWrapper.style.transform.includes(`translateX(${x}px)`), 'pinWrapper offsets dynamically by negative half step during halfway drag');
 
             const fullX = clientX + (HOLE_SPACING) * pinchState.initialScale;
@@ -227,8 +305,7 @@
 
             assert.strictEqual(block.pin.dataset.wasOverHole, 'true', 'Pin evaluates as over hole when drag reaches next hole');
 
-            const s_1 = block.el.style.transform.indexOf('X') + 2,
-                x_1 = -block.el.style.transform.substring(s_1, block.el.style.transform.length - 3);
+            const x_1 = -getTranslateX(block.el);
             assert.ok(block.pin.style.transform.includes(String(PIN_MIDDLE)), 'Pin pops up to PIN_MIDDLE at next hole index');
             assert.ok(block.pinWrapper.style.transform.includes(`translateX(${x_1}px)`), 'pinWrapper offsets dynamically by full negative step');
 
@@ -294,12 +371,11 @@
                     {clientX: 100, clientY: 100},
                     {clientX: 150, clientY: 150}
                 ],
-                preventDefault: () => {}
+                preventDefault: () => {
+                }
             });
 
-            const
-                s_1 = block.el.style.transform.indexOf('X') + 2,
-                x_1 = -block.el.style.transform.substring(s_1, block.el.style.transform.length - 3);
+            const x_1 = -getTranslateX(block.el);
 
             assert.ok(block.pinWrapper.style.transform.includes(`translateX(${-x_1}px)`), 'pinWrapper instantly counter-translates back to -initialX (0px)');
             assert.strictEqual(block.pin.dataset.wasOverHole, 'true', 'updatePinState recognizes the pin is back over a valid hole');
@@ -393,7 +469,7 @@
         QUnit.test('handleDragStart() initializes drag state variables correctly', assert => {
             const block = gameState.blocks[0];
 
-            block.group = { [block.id]: 1 };
+            block.group = {[block.id]: 1};
 
             const clientX = 100;
             block.el.dispatchEvent(new MouseEvent('mousedown', {clientX, bubbles: true}));
@@ -416,12 +492,13 @@
 
             gameState.dragState.isDragging = true;
             gameState.dragState.activePlate = gameState.blocks[0].el;
-            gameState.dragState.longPressTimer = setTimeout(() => {}, 1000);
+            gameState.dragState.longPressTimer = setTimeout(() => {
+            }, 1000);
 
             const touchEvent = new TouchEvent('touchstart', {
                 touches: [
-                    new Touch({ identifier: 1, target: gameState.blocks[0].el, clientX: 100, clientY: 100 }) ,
-                    new Touch({ identifier: 2, target: gameState.blocks[2].el, clientX: 200, clientY: 100 })
+                    new Touch({identifier: 1, target: gameState.blocks[0].el, clientX: 100, clientY: 100}),
+                    new Touch({identifier: 2, target: gameState.blocks[2].el, clientX: 200, clientY: 100})
                 ],
                 bubbles: true,
                 cancelable: true
@@ -558,8 +635,8 @@
             const block = gameState.blocks[0];
             const beforeTouch = Date.now();
 
-            const touchEvent = new Event('touchend', { bubbles: true });
-            touchEvent.changedTouches = [{ clientX: 100, clientY: 100 }];
+            const touchEvent = new Event('touchend', {bubbles: true});
+            touchEvent.changedTouches = [{clientX: 100, clientY: 100}];
 
             window.dispatchEvent(touchEvent);
 
@@ -739,10 +816,7 @@
         hooks.beforeEach(() => {
             clock = sinon.useFakeTimers();
 
-            currentSolution = null;
-            currentStepIndex = 0;
-            isPlaying = false;
-            moveMap = [];
+            resetPlaybackState();
 
             prevBtn.disabled = false;
             nextBtn.disabled = false;
@@ -763,24 +837,26 @@
 
         hooks.afterEach(() => {
             clock.restore();
+            sinon.restore();
             HTMLElement.prototype.scrollIntoView = originalScrollIntoView;
             jumpToStep = originalJumpToStep;
             solutionList.innerHTML = '';
+            resetPlaybackState();
         });
 
         QUnit.test('renderSolutionList() builds a 1-to-1 list when squash is disabled', assert => {
             squashMovesCheck.checked = false;
 
-            currentSolution = [
-                { plate: gameState.blocks[0].id, direction: 'right' },
-                { plate: gameState.blocks[0].id, direction: 'right' },
-                { plate: gameState.blocks[1].id, direction: 'left' }
+            playback.solution = [
+                {plate: gameState.blocks[0].id, direction: 'right'},
+                {plate: gameState.blocks[0].id, direction: 'right'},
+                {plate: gameState.blocks[1].id, direction: 'left'}
             ];
 
             renderSolutionList();
 
             assert.strictEqual(solutionList.children.length, 3, 'Renders exactly 3 steps for 3 moves');
-            assert.deepEqual(moveMap, [0, 1, 2], 'moveMap points 1-to-1 for unsquashed moves');
+            assert.deepEqual(playback.moveMap, [0, 1, 2], 'moveMap points 1-to-1 for unsquashed moves');
 
             const firstStep = solutionList.children[0];
             assert.ok(firstStep.textContent.includes('RIGHT'), 'Appends proper text and icon formatting for RIGHT');
@@ -792,18 +868,18 @@
             const p1 = gameState.blocks[0].id;
             const p2 = gameState.blocks[1].id;
 
-            currentSolution = [
-                { plate: p1, direction: 'right' },
-                { plate: p1, direction: 'right' },
-                { plate: p2, direction: 'left' },
-                { plate: p2, direction: 'left' },
-                { plate: p2, direction: 'left' }
+            playback.solution = [
+                {plate: p1, direction: 'right'},
+                {plate: p1, direction: 'right'},
+                {plate: p2, direction: 'left'},
+                {plate: p2, direction: 'left'},
+                {plate: p2, direction: 'left'}
             ];
 
             renderSolutionList();
 
             assert.strictEqual(solutionList.children.length, 2, 'Compresses 5 moves into 2 DOM elements');
-            assert.deepEqual(moveMap, [0, 0, 1, 1, 1], 'moveMap correctly maps original move indexes to the squashed DOM indexes');
+            assert.deepEqual(playback.moveMap, [0, 0, 1, 1, 1], 'moveMap correctly maps original move indexes to the squashed DOM indexes');
 
             assert.ok(solutionList.children[0].textContent.includes('(x2)'), 'Appends multiplier string (x2) to the first group');
             assert.ok(solutionList.children[1].textContent.includes('(x3)'), 'Appends multiplier string (x3) to the second group');
@@ -811,9 +887,9 @@
 
         QUnit.test('renderSolutionList() attaches click listeners linking to targetIndex', assert => {
             squashMovesCheck.checked = true;
-            currentSolution = [
-                { plate: gameState.blocks[0].id, direction: 'right' },
-                { plate: gameState.blocks[0].id, direction: 'right' }
+            playback.solution = [
+                {plate: gameState.blocks[0].id, direction: 'right'},
+                {plate: gameState.blocks[0].id, direction: 'right'}
             ];
 
             renderSolutionList();
@@ -824,13 +900,13 @@
         });
 
         QUnit.test('updatePlaybackUI() properly configures button disabled states based on playback progress', assert => {
-            currentSolution = [
-                { plate: gameState.blocks[0].id, direction: 'right' },
-                { plate: gameState.blocks[1].id, direction: 'left' }
+            playback.solution = [
+                {plate: gameState.blocks[0].id, direction: 'right'},
+                {plate: gameState.blocks[1].id, direction: 'left'}
             ];
 
-            currentStepIndex = 0;
-            isPlaying = false;
+            playback.stepIndex = 0;
+            playback.isPlaying = false;
             updatePlaybackUI();
 
             assert.ok(prevBtn.disabled, 'Prev button disabled at start');
@@ -838,8 +914,8 @@
             assert.notOk(playBtn.disabled, 'Play button enabled at start');
             assert.notOk(restartSeqBtn.disabled, 'Restart button enabled');
 
-            currentStepIndex = 1;
-            isPlaying = true;
+            playback.stepIndex = 1;
+            playback.isPlaying = true;
             updatePlaybackUI();
 
             assert.ok(prevBtn.disabled, 'Prev button disabled while playing');
@@ -847,8 +923,8 @@
             assert.ok(solveBtn.disabled, 'Solve button disabled while playing');
             assert.ok(restartSeqBtn.disabled, 'Restart button disabled while playing');
 
-            currentStepIndex = 2;
-            isPlaying = false;
+            playback.stepIndex = 2;
+            playback.isPlaying = false;
             updatePlaybackUI();
 
             assert.notOk(prevBtn.disabled, 'Prev button enabled at the end');
@@ -857,18 +933,18 @@
         });
 
         QUnit.test('updatePlaybackUI() highlights active steps in the list and cleans up previous highlights', assert => {
-            currentSolution = [
-                { plate: gameState.blocks[0].id, direction: 'right' },
-                { plate: gameState.blocks[1].id, direction: 'left' }
+            playback.solution = [
+                {plate: gameState.blocks[0].id, direction: 'right'},
+                {plate: gameState.blocks[1].id, direction: 'left'}
             ];
             renderSolutionList();
 
-            currentStepIndex = 0;
+            playback.stepIndex = 0;
             updatePlaybackUI();
 
             assert.ok(solutionList.children[0].classList.contains('active-step'), 'Applies active-step to the 0th element');
 
-            currentStepIndex = 1;
+            playback.stepIndex = 1;
             updatePlaybackUI();
 
             assert.notOk(solutionList.children[0].classList.contains('active-step'), 'Removes active-step from the 0th element on progress');
@@ -877,14 +953,14 @@
         });
 
         QUnit.test('updatePlaybackUI() smoothly fades out non-targeted glows using a 250ms timeout', assert => {
-            currentSolution = [{ plate: gameState.blocks[0].id, direction: 'right' }];
+            playback.solution = [{plate: gameState.blocks[0].id, direction: 'right'}];
             renderSolutionList();
 
             const staleHole = gameState.blocks[1].el.querySelector('.hole');
             staleHole.classList.add(UI_CLASSES.GLOW);
             gameState.glowingHoles.push(staleHole)
 
-            currentStepIndex = 0;
+            playback.stepIndex = 0;
             updatePlaybackUI();
 
             assert.ok(staleHole.classList.contains(UI_CLASSES.GLOW), 'Stale hole retains glow immediately after update');
@@ -926,7 +1002,7 @@
             window.history.pushState({}, '', '?state=' + btoa('not valid json'));
             assert.strictEqual(loadFromURL(), false, 'Returns false on invalid JSON string without crashing');
 
-            const missingFieldsObj = { n: 3 };
+            const missingFieldsObj = {n: 3};
             window.history.pushState({}, '', '?state=' + btoa(JSON.stringify(missingFieldsObj)));
             assert.strictEqual(loadFromURL(), false, 'Returns false when required properties (start, effects) are missing');
         });
@@ -1027,6 +1103,15 @@
             gameState.blocks[0].x = 1 * HOLE_SPACING;
             gameState.blocks[1].x = -1 * HOLE_SPACING;
 
+            if (!navigator.clipboard || typeof navigator.clipboard.writeText !== 'function') {
+                try {
+                    Object.defineProperty(navigator, 'clipboard', {
+                        value: {writeText: () => Promise.resolve()},
+                        configurable: true
+                    });
+                } catch (e) { /* clipboard exists but is immutable in this browser */
+                }
+            }
             const clipboardStub = sinon.stub(navigator.clipboard, 'writeText').resolves();
 
             shareBtn.click();
@@ -1041,8 +1126,11 @@
                 'Phase 1: Without an active sequence, sharing falls back to the current live state [1, -1]'
             );
 
+            const originalSolveInWorker = solveInWorker;
+            solveInWorker = () => Promise.resolve({moves: []});
+
             solveBtn.click();
-            assert.ok(initialSolveSetup, 'initialSolveSetup is successfully populated immediately after clicking solveBtn');
+            assert.ok(playback.initialSetup, 'initialSolveSetup is successfully populated immediately after clicking solveBtn');
 
             gameState.blocks[0].x = 2 * HOLE_SPACING;
 
@@ -1057,7 +1145,7 @@
             );
 
             clearSolutionUI();
-            assert.strictEqual(initialSolveSetup, null, 'initialSolveSetup is completely wiped back to null upon clearing the UI');
+            assert.strictEqual(playback.initialSetup, null, 'initialSolveSetup is completely wiped back to null upon clearing the UI');
 
             shareBtn.click();
             sharedUrl = new URL(clipboardStub.getCall(2).args[0]);
@@ -1069,11 +1157,11 @@
                 'Phase 3: After clearing the sequence, sharing correctly falls back to generating from the new live state [2, -1]'
             );
 
+            solveInWorker = originalSolveInWorker;
             clipboardStub.restore();
         });
     });
 
-    //Should be run last one. Cuz of timers
     QUnit.module('Lockpicker Game Logic - Long Press', hooks => {
         let clock;
 

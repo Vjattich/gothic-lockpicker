@@ -21,6 +21,8 @@
             -webkit-tap-highlight-color: transparent;
         }
 
+        body.is-dragging .plate { will-change: transform; }
+
         #lock, .plate, .hole {
             -webkit-user-select: none;
             user-select: none;
@@ -817,6 +819,19 @@
                 z-index: 100;
                 box-sizing: border-box;
                 font-size: 14px;
+                min-height: 0;
+                transition: min-height 0.4s ease-out, border-radius 0.4s ease-out;
+            }
+
+            body:not(.tutorial-active) .controls:has(.step-controls-row.show-stretch) {
+                min-height: 35%;
+                border-bottom-left-radius: 0;
+                border-bottom-right-radius: 0;
+            }
+
+            body:not(.tutorial-active):has(.step-controls-row.show-stretch) footer {
+                opacity: 0;
+                pointer-events: none;
             }
 
             .controls-item {
@@ -905,6 +920,7 @@
             align-items: center;
             gap: 10px;
             z-index: 1;
+            transition: opacity 0.3s ease-out;
         }
 
         .box40, .question-mark {
