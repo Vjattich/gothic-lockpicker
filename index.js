@@ -25,7 +25,8 @@ const ACTIONS = {
     DRAG_END: 'handleDragEnd'
 };
 
-const lock = document.getElementById('lock'),
+const
+    lock = document.getElementById('lock'),
     sizeInput = document.getElementById('sizeInput'),
     countInput = document.getElementById('countInput'),
     controls = document.getElementById('controls'),
@@ -45,7 +46,13 @@ const lock = document.getElementById('lock'),
     expandBtn = document.getElementById('expandBtn'),
     inspectorRow = document.getElementById('inspectorRow'),
     shareBtn = document.getElementById('shareBtn'),
-    steamGuideBtn = document.getElementById('steamGuideBtn');
+    steamGuideBtn = document.getElementById('steamGuideBtn'),
+    line = document.getElementById('searchToggle'),
+    panel = document.getElementById('searchPanel'),
+    closeBtn = document.getElementById('searchClose'),
+    countText = document.getElementById('matchCountText'),
+    empty = document.getElementById('searchEmpty')
+;
 
 const
     PIN_RAISED = -10,
@@ -160,6 +167,34 @@ const playback = {
     lastActiveStepEl: null
 };
 
+function setOpen(open) {
+    panel.classList.toggle('is-open', open);
+    line.classList.toggle('is-open', open);
+    line.setAttribute('aria-expanded', open ? 'true' : 'false');
+}
+
+function toggleOpen() {
+    setOpen(!panel.classList.contains('is-open'));
+}
+
+line.addEventListener('click', toggleOpen);
+line.addEventListener('keydown', function (e) {
+    if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        toggleOpen();
+    }
+});
+closeBtn.addEventListener('click', function (e) {
+    e.stopPropagation();
+    setOpen(false);
+});
+
+window.updateMatchCount = function (matches) {
+    const n = Array.isArray(matches) ? matches.length : (matches | 0);
+    countText.textContent = n + (n === 1 ? ' lock' : ' locks');
+    line.classList.toggle('has-matches', n > 0);
+    empty.style.display = n > 0 ? 'none' : 'block';
+};
 function setStatus(text, type = 'info') {
     statusMsg.textContent = text;
     statusMsg.className = `status-message status-${type}`;
