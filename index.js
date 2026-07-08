@@ -218,13 +218,6 @@ function compactSetup() {
 function solveInWorker() {
     if (undefined === window.Worker) return Promise.reject(new Error('Web Workers are not supported.'));
     const setup = compactSetup();
-    const payload = {
-        n: setup.n,
-        start: setup.start,
-        effects: setup.effects,
-        mode: 'fewer-switches-fast',
-        timeoutMs: SOLVE_TIMEOUT_MS
-    };
     return new Promise((resolve, reject) => {
         const worker = new Worker('solver.js');
         const hardTimeout = setTimeout(() => {
@@ -245,7 +238,13 @@ function solveInWorker() {
             worker.terminate();
             reject(error);
         };
-        worker.postMessage(payload);
+        worker.postMessage({
+            n: setup.n,
+            start: setup.start,
+            effects: setup.effects,
+            mode: 'fewer-switches-fast',
+            timeoutMs: SOLVE_TIMEOUT_MS
+        });
     });
 }
 
