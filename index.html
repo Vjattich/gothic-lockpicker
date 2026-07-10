@@ -448,9 +448,22 @@
             font-size: 12px;
             font-family: monospace;
             font-weight: bold;
-            cursor: text-align: center;
+            cursor: pointer;
+            text-align: center;
             border-radius: 0 0 4px 4px;
             transition: background 0.2s ease, color 0.2s ease;
+        }
+
+        footer {
+            position: absolute;
+            bottom: 20px;
+            width: 100%;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 10px;
+            z-index: 1;
+            transition: opacity 0.3s ease-out;
         }
 
         .expand-list-item:active {
@@ -960,7 +973,6 @@
             }
 
             body.tutorial-active.is-solving .controls {
-            body.tutorial-active.is-solving .controls {
                 padding: 10px;
             }
 
@@ -1060,18 +1072,6 @@
             background: transparent;
             z-index: 999;
             display: none;
-        }
-
-        footer {
-            position: absolute;
-            bottom: 20px;
-            width: 100%;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            gap: 10px;
-            z-index: 1;
-            transition: opacity 0.3s ease-out;
         }
 
         .box40, .question-mark {
@@ -1277,5 +1277,6 @@
 <script src="solver.js"></script>
 <script src="index.js"></script>
 <script src="tutorial.js"></script>
+<script src="db.js"></script>
 </body>
 </html>
