@@ -51,7 +51,8 @@ const
     panel = document.getElementById('searchPanel'),
     closeBtn = document.getElementById('searchClose'),
     countText = document.getElementById('matchCountText'),
-    empty = document.getElementById('searchEmpty')
+    empty = document.getElementById('searchEmpty'),
+    searchList = document.getElementById('searchList')
 ;
 
 const
@@ -171,6 +172,7 @@ function setOpen(open) {
     panel.classList.toggle('is-open', open);
     line.classList.toggle('is-open', open);
     line.setAttribute('aria-expanded', open ? 'true' : 'false');
+    if (open) refreshMatches();
 }
 
 function toggleOpen() {
@@ -195,6 +197,135 @@ window.updateMatchCount = function (matches) {
     line.classList.toggle('has-matches', n > 0);
     empty.style.display = n > 0 ? 'none' : 'block';
 };
+
+function currentPosString() {
+    return gameState.blocks.map(b => Math.round(b.x / HOLE_SPACING));
+}
+
+function currentLinksString() {
+    const parts = [];
+    for (const b of gameState.blocks) {
+        const targets = Object.keys(b.group)
+            .map(Number)
+            .filter(t => t !== b.id)
+            .sort((a, z) => a - z);
+        for (const t of targets) parts.push(`${b.id}>${t}:${b.group[t]}`);
+    }
+    return parts.join(';');
+}
+
+// --- Matcher: size -> position -> connections, cheapest filter first --------
+
+function getCatalogueMatches() {
+
+    let candidates = LOCK_CATALOGUE.filter(e => e.n === gameState.blocks.length);
+    if (0 === candidates.length) return candidates;
+
+    // links never change during play, so filter the fixed structure next
+
+    const currentPositioning = currentPosString();
+
+    candidates = candidates.filter(e => {
+
+        const entry = e.pos.split(',');
+
+        let seems = true,
+            isAllZero = true
+        for (let i = 0; i < currentPositioning.length; i++) {
+            const pos = currentPositioning[i];
+
+            if (0 === pos) {
+                if (isAllZero) {
+                    seems = false;
+                }
+                continue;
+            }
+
+            seems = seems && pos === +entry[i];
+            isAllZero = pos !== +entry[i];
+        }
+
+        return seems;
+    });
+
+    const links = currentLinksString();
+
+    if (!links) {
+        return candidates;
+    }
+
+    candidates = candidates.filter(e => e.links === links);
+    if (0 === candidates.length) return candidates;
+
+    return candidates;
+}
+
+function refreshMatches() {
+    const matches = getCatalogueMatches();
+    window.updateMatchCount(matches);
+    renderSearchList(matches);
+}
+
+let lastMatches = [];
+
+function renderSearchList(matches) {
+    lastMatches = matches;
+    const fragment = document.createDocumentFragment();
+    for (const entry of matches) {
+        const item = document.createElement('button');
+        item.type = 'button';
+        item.className = 'search-item';
+        item.dataset.id = entry.id;
+        item.textContent = `Lock #${entry.id} · ${entry.n} plates`;
+        fragment.appendChild(item);
+    }
+    searchList.replaceChildren(fragment);
+}
+
+searchList.addEventListener('click', (e) => {
+    const item = e.target.closest('.search-item');
+    if (!item) return;
+    const entry = lastMatches.find(m => String(m.id) === item.dataset.id);
+    if (entry) loadCatalogueLock(entry);
+});
+
+
+let matchRefreshTimer = null;
+function scheduleMatchRefresh() {
+    clearTimeout(matchRefreshTimer);
+    matchRefreshTimer = setTimeout(refreshMatches, 120);
+}
+
+function loadCatalogueLock(entry) {
+    let setup;
+    try {
+        setup = JSON.parse(atob(entry.state));
+    } catch (e) {
+        console.error('Bad catalogue state for lock #' + entry.id, e);
+        return;
+    }
+
+    gameState.isRender = true;
+    countInput.value = setup.n;
+    gameState.blocks = [];
+    renderBlocks();
+
+    for (let i = 0; i < setup.n; i++) {
+        const b = gameState.blocks[i];
+        b.x = setup.start[i] * HOLE_SPACING;
+        b.group = {};
+        setup.effects[i].forEach((rel, j) => {
+            if (rel !== 0) b.group[j + 1] = rel;
+        });
+        updateBlockState(b, { x: b.x });
+    }
+
+    renderInspectorRow();
+    gameState.isRender = false;
+    setOpen(false);
+    scheduleMatchRefresh();
+}
+
 function setStatus(text, type = 'info') {
     statusMsg.textContent = text;
     statusMsg.className = `status-message status-${type}`;
@@ -653,6 +784,8 @@ function updateBlockState(b, options = {}) {
     } else {
         updateSinglePinMove(b, pinTime);
     }
+
+    scheduleMatchRefresh()
 }
 
 function updateHoverPreview(plate) {
@@ -834,6 +967,7 @@ sizeInput.addEventListener('input', (e) => document.documentElement.style.setPro
 countInput.addEventListener('input', (e) => {
     renderBlocks();
     clearSolutionUI();
+    scheduleMatchRefresh()
 });
 
 btnDecrease.addEventListener('click', () => {
@@ -939,6 +1073,7 @@ function longPress(clickedId) {
                 updateHoverPreview(gameState.dragState.activePlate);
                 vibrate(15);
                 renderInspectorRow();
+                scheduleMatchRefresh();
             } else {
                 const masterBlock = gameState.blocks[gameState.activeLinkerId - 1];
                 if (masterBlock.group[curBlock.id]) {

@@ -1,3 +1,5 @@
 const LOCK_CATALOGUE = [
-    ""
-]
+    {id: 1, title: "Third neighbour new camp", n: 5, pos: "2,3,0,1,2", links: "1>3:-1;2>1:-1;2>3:-1;3>1:-1;3>2:1;3>4:1;3>5:-1;4>3:1", state: "eyJuIjo1LCJzdGFydCI6WzIsMywwLDEsMl0sImVmZmVjdHMiOltbMSwwLC0xLDAsMF0sWy0xLDEsLTEsMCwwXSxbLTEsMSwxLDEsLTFdLFswLDAsMSwxLDBdLFswLDAsMCwwLDFdXX0="},
+    {id: 2, title: "First neighbour new camp", n: 6, pos: "0,1,-1,3,-1,3", links: "1>4:-1;2>3:-1;2>4:-1;4>2:1;4>6:-1;5>3:1;5>4:1;6>4:-1", state: "eyJuIjo2LCJzdGFydCI6WzAsMSwtMSwzLC0xLDNdLCJlZmZlY3RzIjpbWzEsMCwwLC0xLDAsMF0sWzAsMSwtMSwtMSwwLDBdLFswLDAsMSwwLDAsMF0sWzAsMSwwLDEsMCwtMV0sWzAsMCwxLDEsMSwwXSxbMCwwLDAsLTEsMCwxXV19"},
+    {id: 3, title: "", n: 6, pos: "-1,-3,1,-3,3,2", links: "1>3:-1;1>4:-1;2>3:-1;4>2:-1;5>3:1;5>4:1", state: "eyJuIjo2LCJzdGFydCI6Wy0xLC0zLDEsLTMsMywyXSwiZWZmZWN0cyI6W1sxLDAsLTEsLTEsMCwwXSxbMCwxLC0xLDAsMCwwXSxbMCwwLDEsMCwwLDBdLFswLC0xLDAsMSwwLDBdLFswLDAsMSwxLDEsMF0sWzAsMCwwLDAsMCwxXV19"}
+];
