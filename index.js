@@ -202,9 +202,12 @@ function currentPosString() {
     return gameState.blocks.map(b => Math.round(b.x / HOLE_SPACING));
 }
 
-function currentLinksString() {
+function currentLinksString(
+    //todo adapt for tests
+    blocks
+) {
     const parts = [];
-    for (const b of gameState.blocks) {
+    for (const b of blocks || gameState.blocks) {
         const targets = Object.keys(b.group)
             .map(Number)
             .filter(t => t !== b.id)
@@ -235,14 +238,14 @@ function getCatalogueMatches() {
             const pos = currentPositioning[i];
 
             if (0 === pos) {
-                if (isAllZero) {
+                if (currentPositioning.length - 1 === pos && isAllZero) {
                     seems = false;
                 }
                 continue;
             }
 
             seems = seems && pos === +entry[i];
-            isAllZero = pos !== +entry[i];
+            isAllZero = isAllZero && pos !== +entry[i];
         }
 
         return seems;
@@ -268,6 +271,14 @@ function refreshMatches() {
 
 let lastMatches = [];
 
+function decodeTitle(title) {
+    try {
+        return decodeURIComponent(title);
+    } catch (e) {
+        return title;
+    }
+}
+
 function renderSearchList(matches) {
     lastMatches = matches;
     const fragment = document.createDocumentFragment();
@@ -276,7 +287,7 @@ function renderSearchList(matches) {
         item.type = 'button';
         item.className = 'search-item';
         item.dataset.id = entry.id;
-        item.textContent = `Lock #${entry.id} · ${entry.n} plates`;
+        item.textContent = decodeTitle(entry.title);
         fragment.appendChild(item);
     }
     searchList.replaceChildren(fragment);
@@ -296,34 +307,73 @@ function scheduleMatchRefresh() {
     matchRefreshTimer = setTimeout(refreshMatches, 120);
 }
 
-function loadCatalogueLock(entry) {
-    let setup;
+function decodeSetup(encoded) {
     try {
-        setup = JSON.parse(atob(entry.state));
+        const setup = JSON.parse(atob(encoded));
+        if (!setup || !setup.n || !setup.start || !setup.effects) return null;
+        return setup;
     } catch (e) {
-        console.error('Bad catalogue state for lock #' + entry.id, e);
+        return null;
+    }
+}
+
+const SETUP_ANIMATION_MS = 350;
+
+function applySetup(setup, animate = false) {
+    gameState.isRender = true;
+    try {
+        countInput.value = setup.n;
+        gameState.activeLinkerId = null;
+
+        if (animate && gameState.blocks.length === setup.n) {
+            // keep existing plates so they can slide from the current state
+            gameState.blocks.forEach(b => b.el.classList.remove(
+                UI_CLASSES.TOUCHED, UI_CLASSES.SELECTED, UI_CLASSES.LINKED, UI_CLASSES.RINKED
+            ));
+        } else {
+            animate = false;
+            gameState.blocks = [];
+            renderBlocks();
+        }
+
+        for (let i = 0; i < setup.n; i++) {
+            const
+                b = gameState.blocks[i],
+                targetX = setup.start[i] * HOLE_SPACING;
+
+            b.group = {};
+            setup.effects[i].forEach((rel, j) => {
+                if (0 !== rel) b.group[j + 1] = rel;
+            });
+
+            if (animate && b.x !== targetX) {
+                updateBlockState(b, {
+                    x: targetX,
+                    transition: `transform ${SETUP_ANIMATION_MS / 1000}s ease-out`,
+                    pinTime: SETUP_ANIMATION_MS
+                });
+            } else {
+                updateBlockState(b, {x: targetX});
+            }
+        }
+
+        renderInspectorRow();
+    } finally {
+        gameState.isRender = false;
+    }
+}
+
+function loadCatalogueLock(entry) {
+    const setup = decodeSetup(entry.state);
+    if (!setup) {
+        console.error('Bad catalogue state for lock #' + entry.id);
         return;
     }
 
-    gameState.isRender = true;
-    countInput.value = setup.n;
-    gameState.blocks = [];
-    renderBlocks();
-
-    for (let i = 0; i < setup.n; i++) {
-        const b = gameState.blocks[i];
-        b.x = setup.start[i] * HOLE_SPACING;
-        b.group = {};
-        setup.effects[i].forEach((rel, j) => {
-            if (rel !== 0) b.group[j + 1] = rel;
-        });
-        updateBlockState(b, { x: b.x });
-    }
-
-    renderInspectorRow();
-    gameState.isRender = false;
     setOpen(false);
+    applySetup(setup, true);
     scheduleMatchRefresh();
+    solveBtn.click();
 }
 
 function setStatus(text, type = 'info') {
@@ -706,7 +756,7 @@ function vibrate(duration) {
 function updateSinglePinMove(b, outTime) {
     updatePinState(b, {
         hidePin: true,
-        wrapperTransition: 'transform 0.2s ease-out',
+        wrapperTransition: `transform ${outTime / 1000}s ease-out`,
         pinTransition: 'transform 0.1s cubic-bezier(0.175, 0.885, 0.32, 1.275)'
     });
     setTimeout(() => {
@@ -862,40 +912,19 @@ function loadFromURL() {
 
     if (!stateParam) return false;
 
-    try {
-        const stateObj = JSON.parse(atob(stateParam));
-        if (!stateObj.n || !stateObj.start || !stateObj.effects) return false;
-
-        gameState.isRender = true;
-        countInput.value = stateObj.n;
-        gameState.blocks = [];
-        renderBlocks();
-
-        for (let i = 0; i < stateObj.n; i++) {
-            const b = gameState.blocks[i];
-            b.x = stateObj.start[i] * HOLE_SPACING;
-            b.group = {};
-            stateObj.effects[i].forEach((rel, j) => {
-                if (rel !== 0) {
-                    b.group[j + 1] = rel;
-                }
-            });
-            updateBlockState(b, { x: b.x });
-        }
-
-        renderInspectorRow()
-
-        const cleanUrl = new URL(window.location.href);
-        cleanUrl.searchParams.delete('state');
-        window.history.replaceState({}, document.title, cleanUrl.toString());
-        solveBtn.click();
-        return true;
-    } catch (e) {
-        console.error("Failed to load shared state:", e);
+    const setup = decodeSetup(stateParam);
+    if (!setup) {
+        console.error('Failed to load shared state.');
         return false;
-    } finally {
-        gameState.isRender = false
     }
+
+    applySetup(setup);
+
+    const cleanUrl = new URL(window.location.href);
+    cleanUrl.searchParams.delete('state');
+    window.history.replaceState({}, document.title, cleanUrl.toString());
+    solveBtn.click();
+    return true;
 }
 
 function renderBlocks() {
@@ -960,6 +989,7 @@ function renderBlocks() {
 
     lock.appendChild(fragment);
     renderInspectorRow();
+    refreshMatches();
 }
 
 sizeInput.addEventListener('input', (e) => document.documentElement.style.setProperty('--block-scale', e.target.value));
@@ -1033,6 +1063,7 @@ resetBtn.addEventListener('click', () => {
     gameState.dragState.isDragging = false;
     clearTimeout(gameState.dragState.longPressTimer);
     renderBlocks();
+    refreshMatches()
 });
 
 if (!loadFromURL()) {
