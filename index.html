@@ -21,7 +21,9 @@
             -webkit-tap-highlight-color: transparent;
         }
 
-        body.is-dragging .plate { will-change: transform; }
+        body.is-dragging .plate {
+            will-change: transform;
+        }
 
         #lock, .plate, .hole {
             -webkit-user-select: none;
@@ -130,18 +132,33 @@
 
         .search-panel {
             position: absolute;
-            inset: 0;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 0;
             background: #1a1a1a;
             border-radius: 8px;
-            padding: 16px;
+            padding: 0 16px;
             box-sizing: border-box;
             z-index: 20;
-            display: none;
+            display: flex;
             flex-direction: column;
+            overflow: hidden;
+            visibility: hidden;
+            pointer-events: none;
+            /* Same stretch animation as .solution-list (height 0.3s ease-out, no fade) */
+            transition: height 0.3s ease-out, padding 0.3s ease-out, visibility 0s linear 0.3s;
         }
 
         .search-panel.is-open {
-            display: flex;
+            visibility: visible;
+            pointer-events: auto;
+            padding: 16px;
+            transition: height 0.3s ease-out, padding 0.3s ease-out, visibility 0s;
+        }
+
+        .search-close .ico-roll {
+            display: none;
         }
 
         .search-panel-header {
@@ -884,9 +901,66 @@
                 display: inline-flex;
             }
 
-            #resetBtn { order: 1; }
-            #shareBtn { order: 2; }
-            #solveBtn { order: 3; }
+            .search-panel {
+                position: fixed;
+                top: auto;
+                left: 12px;
+                right: 12px;
+                bottom: 12px;
+                border-radius: 12px;
+                z-index: 1000;
+            }
+
+            .search-panel.is-open {
+                height: calc(100dvh - 24px - env(safe-area-inset-top));
+                padding-bottom: calc(16px + env(safe-area-inset-bottom));
+            }
+
+            .search-close .ico-x {
+                display: none;
+            }
+
+            .search-close .ico-roll {
+                display: block;
+            }
+
+            /* Promote header children to panel flex items so the close
+               button can be reordered below the list */
+            .search-panel-header {
+                display: contents;
+            }
+
+            .search-panel-title {
+                order: -1;
+                flex: 0 0 auto;
+                margin-bottom: 12px;
+                font-size: 16px;
+            }
+
+            .search-panel .search-body {
+                order: 0;
+            }
+
+            .search-panel .search-close {
+                order: 1;
+                flex: 0 0 auto;
+                width: 100%;
+                height: 44px;
+                margin-top: 12px;
+                font-size: 15px;
+            }
+
+            #resetBtn {
+                order: 1;
+            }
+
+            #shareBtn {
+                order: 2;
+            }
+
+            #solveBtn {
+                order: 3;
+            }
 
             #blockCountContainer .number-control {
                 display: flex;
@@ -1148,11 +1222,12 @@
         .lock-mechanism, .plate, .top-face, .corner-tube, .hole, .pin-wrapper, .pin, .pin-body {
             -webkit-transform-style: preserve-3d;
         }
+
         /* ------------------------------- */
     </style>
 </head>
 <body>
-<div id="controls" class="controls">
+<div class="controls" id="controls">
     <label class="controls-item" id="scaleLabel">Scale:
         <input id="sizeInput" max="2" min="0.3" step="0.1" type="range" value="1">
     </label>
@@ -1166,17 +1241,20 @@
         </div>
     </label>
     <div class="controls-item search-block">
-        <div class="search-row" id="searchToggle" role="button" tabindex="0" aria-expanded="false" aria-controls="searchPanel" title="Matching saved locks">
+        <div aria-controls="searchPanel" aria-expanded="false" class="search-row" id="searchToggle" role="button"
+             tabindex="0" title="Matching saved locks">
             <span class="search-left">
-                <svg class="search-ico" viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round">
+                <svg class="search-ico" fill="none" height="18" stroke="currentColor" stroke-linecap="round"
+                     stroke-linejoin="round" stroke-width="2.5" viewBox="0 0 24 24" width="18">
                     <circle cx="11" cy="11" r="7"></circle>
-                    <line x1="21" y1="21" x2="16.65" y2="16.65"></line>
+                    <line x1="21" x2="16.65" y1="21" y2="16.65"></line>
                 </svg>
                 <span class="search-label label-text">Matches:</span>
             </span>
             <span class="search-value">
                 <span id="matchCountText">0 locks</span>
-                <svg class="search-chevron" viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round">
+                <svg class="search-chevron" fill="none" height="18" stroke="currentColor" stroke-linecap="round"
+                     stroke-linejoin="round" stroke-width="2.5" viewBox="0 0 24 24" width="18">
                     <polyline points="6 9 12 15 18 9"></polyline>
                 </svg>
             </span>
@@ -1184,10 +1262,15 @@
         <div class="search-panel" id="searchPanel">
             <div class="search-panel-header">
                 <span class="search-panel-title">Matching locks</span>
-                <button class="search-close" id="searchClose" aria-label="Close" title="Close">
-                    <svg viewBox="0 0 24 24" width="18" height="18" stroke="currentColor" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round">
-                        <line x1="18" y1="6" x2="6" y2="18"></line>
-                        <line x1="6" y1="6" x2="18" y2="18"></line>
+                <button aria-label="Close" class="search-close" id="searchClose" title="Close">
+                    <svg class="ico-x" fill="none" height="18" stroke="currentColor" stroke-linecap="round"
+                         stroke-linejoin="round" stroke-width="2.5" viewBox="0 0 24 24" width="18">
+                        <line x1="18" x2="6" y1="6" y2="18"></line>
+                        <line x1="6" x2="18" y1="6" y2="18"></line>
+                    </svg>
+                    <svg class="ico-roll" fill="none" height="22" stroke="currentColor" stroke-linecap="round"
+                         stroke-linejoin="round" stroke-width="2.5" viewBox="0 0 24 24" width="22">
+                        <polyline points="6 9 12 15 18 9"></polyline>
                     </svg>
                 </button>
             </div>
@@ -1199,19 +1282,21 @@
     </div>
     <div class="action-row controls-item">
         <button aria-label="Reset" id="resetBtn" title="Reset Lock">
-            <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round">
+            <svg fill="none" height="20" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5"
+                 viewBox="0 0 24 24" width="20">
                 <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path>
                 <path d="M3 3v5h5"></path>
             </svg>
         </button>
         <button id="solveBtn">Solve Lock</button>
         <button aria-label="Share" id="shareBtn" title="Share Lock State">
-            <svg viewBox="0 0 24 24" width="20" height="20" stroke="currentColor" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round">
+            <svg fill="none" height="20" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5"
+                 viewBox="0 0 24 24" width="20">
                 <circle cx="18" cy="5" r="3"></circle>
                 <circle cx="6" cy="12" r="3"></circle>
                 <circle cx="18" cy="19" r="3"></circle>
-                <line x1="8.59" y1="13.51" x2="15.42" y2="17.49"></line>
-                <line x1="15.41" y1="6.51" x2="8.59" y2="10.49"></line>
+                <line x1="8.59" x2="15.42" y1="13.51" y2="17.49"></line>
+                <line x1="15.41" x2="8.59" y1="6.51" y2="10.49"></line>
             </svg>
         </button>
     </div>

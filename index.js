@@ -154,6 +154,7 @@ window.addEventListener('resize', () => {
         const wasMobile = gameState.isMobile;
         setInitialState();
         if (wasMobile !== gameState.isMobile) renderBlocks();
+        sizeSearchPanel();
     }, 150);
 });
 
@@ -168,11 +169,29 @@ const playback = {
     lastActiveStepEl: null
 };
 
+function sizeSearchPanel() {
+    if (!panel.classList.contains('is-open')) return;
+    if (gameState.isMobile) {
+        panel.style.height = ''; // mobile: bottom sheet height comes from CSS
+        return;
+    }
+    const
+        rect = panel.getBoundingClientRect(),
+        bottomPadding = window.innerHeight * 0.05,
+        availableHeight = window.innerHeight - rect.top - bottomPadding;
+    panel.style.height = `${Math.max(availableHeight, 200)}px`;
+}
+
 function setOpen(open) {
     panel.classList.toggle('is-open', open);
     line.classList.toggle('is-open', open);
     line.setAttribute('aria-expanded', open ? 'true' : 'false');
-    if (open) refreshMatches();
+    if (open) {
+        refreshMatches();
+        sizeSearchPanel();
+    } else {
+        panel.style.height = '';
+    }
 }
 
 function toggleOpen() {
