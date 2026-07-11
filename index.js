@@ -219,12 +219,12 @@ function currentLinksString(
 
 // --- Matcher: size -> position -> connections, cheapest filter first --------
 
-function getCatalogueMatches() {
+function getCatalogueMatches(catalogue) {
+    const source = catalogue
+        || (typeof LOCK_CATALOGUE !== 'undefined' ? LOCK_CATALOGUE : []);
 
-    let candidates = LOCK_CATALOGUE.filter(e => e.n === gameState.blocks.length);
+    let candidates = source.filter(e => e.n === gameState.blocks.length);
     if (0 === candidates.length) return candidates;
-
-    // links never change during play, so filter the fixed structure next
 
     const currentPositioning = currentPosString();
 
