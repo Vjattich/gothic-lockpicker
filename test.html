@@ -269,22 +269,46 @@
         hooks.beforeEach(() => setUpThreeBlocks());
         hooks.afterEach(() => setUpThreeBlocks());
 
+        const testTimings = {};
+        QUnit.testDone(details => {
+            const timing = testTimings[details.testId];
+            if (!timing) return;
+            const li = document.getElementById('qunit-test-output-' + details.testId);
+            if (!li) return;
+            const span = document.createElement('span');
+            span.className = 'runtime';
+            span.textContent = ' \u2014 ' + timing;
+            li.querySelector('.test-name').append(span);
+        });
+
         QUnit.test('stays correct on a 10k-entry catalogue', assert => {
             gameState.blocks[0].x = 1 * HOLE_SPACING;
             gameState.blocks[1].x = -2 * HOLE_SPACING;
 
+            let t0 = performance.now();
+            const positionIds = getCatalogueMatches(HUGE).map(e => e.id);
+            const positionMs = performance.now() - t0;
+
             assert.deepEqual(
-                getCatalogueMatches(HUGE).map(e => e.id),
+                positionIds,
                 referenceMatch(HUGE, [1, -2, 0], ''),
                 'Position matching agrees with a straightforward reference filter'
             );
 
             gameState.blocks[0].group = {1: 1, 2: 1};
+
+            t0 = performance.now();
+            const linkIds = getCatalogueMatches(HUGE).map(e => e.id);
+            const linkMs = performance.now() - t0;
+
             assert.deepEqual(
-                getCatalogueMatches(HUGE).map(e => e.id),
+                linkIds,
                 referenceMatch(HUGE, [1, -2, 0], '1>2:1'),
                 'Link matching agrees with the reference filter too'
             );
+
+            testTimings[QUnit.config.current.testId] =
+                'positions: ' + positionMs.toFixed(2) + 'ms, links: ' + linkMs.toFixed(2) + 'ms';
         });
 
         QUnit.test('matches a 10k-entry catalogue well within one refresh debounce', assert => {
