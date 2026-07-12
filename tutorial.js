@@ -145,6 +145,9 @@ function endTutorial() {
 function clean() {
     hideArrows();
 
+    tutorialSearchDemo = false;
+    setSearchOpen(false);
+
     clearSolutionUI();
     clearHoverPreview();
 
@@ -171,15 +174,36 @@ function clean() {
         if (btn) releaseButtonVisual(btn);
     });
 
-    if (6 !== +countInput.value && 3 !== tutorialStep) {
+    if (6 !== +countInput.value && 'adjustPlates' !== currentStepName()) {
         countInput.value = 6;
         renderBlocks();
     }
 }
 
+/**
+ * The order of tutorial steps. tutorialStep is a 1-based index into this array,
+ * so inserting a new step is just inserting its name here — no renumbering.
+ */
+const TUTORIAL_ORDER = [
+    'zoom',
+    'dragPlates',
+    'adjustPlates',
+    'groupPlates',
+    'inspectGroups',
+    'stepControls',
+    'searchCount',
+    'searchPick',
+    'autoPlay',
+    'share'
+];
+
+function currentStepName() {
+    return TUTORIAL_ORDER[tutorialStep - 1];
+}
+
 const TUTORIAL_STEPS = {
 
-    async 1(cancelled) {
+    async zoom(cancelled) {
         clean();
 
         tutorialText.textContent = gameState.isMobile
@@ -213,7 +237,7 @@ const TUTORIAL_STEPS = {
         setScale(baseScale);
     },
 
-    async 2(cancelled) {
+    async dragPlates(cancelled) {
         clean();
         tutorialText.textContent = 'You can drag selected plates left or right.';
         let plateIndex = 0;
@@ -228,7 +252,7 @@ const TUTORIAL_STEPS = {
         }
     },
 
-    async 3(cancelled) {
+    async adjustPlates(cancelled) {
         tutorialText.textContent = 'Adjust plates like in a game: plates count and plates position.';
         while (!cancelled()) {
             if (6 !== +countInput.value) {
@@ -275,7 +299,7 @@ const TUTORIAL_STEPS = {
         }
     },
 
-    async 4(cancelled) {
+    async groupPlates(cancelled) {
         clean();
         tutorialText.textContent = 'Long-press to group plates. Blue moves with it, Red opposite. Tap again to deselect.';
         while (!cancelled()) {
@@ -324,7 +348,7 @@ const TUTORIAL_STEPS = {
         }
     },
 
-    async 5(cancelled) {
+    async inspectGroups(cancelled) {
         clean();
         tutorialText.textContent = gameState.isMobile
             ? 'Touch the number row to see what groups are selected for plate'
@@ -368,7 +392,7 @@ const TUTORIAL_STEPS = {
         }
     },
 
-    async 6(cancelled) {
+    async stepControls(cancelled) {
         clean();
         tutorialText.textContent = gameState.isMobile
             ? 'You can walk step-by-step by pressing step controls. If you hold it, it will move plates state-by-state.'
@@ -419,7 +443,91 @@ const TUTORIAL_STEPS = {
         }
     },
 
-    async 7(cancelled) {
+    async searchCount(cancelled) {
+        clean();
+        tutorialSearchDemo = true;
+        tutorialText.textContent = 'The counter shows how many saved locks match your current lock. Watch it update as the plates change.';
+
+        while (!cancelled()) {
+            if (6 !== +countInput.value) {
+                countInput.value = 6;
+                renderBlocks();
+            }
+            resetBtn.click();
+            refreshMatches();
+            positionArrowRelative(searchToggle, 15, -40);
+            await stepSleep(1500);
+            if (cancelled()) break;
+
+            const demoStates = [
+                [HOLE_SPACING, 0, 0, 0, 0, 0],
+                [HOLE_SPACING, -HOLE_SPACING, 0, 0, 0, 0],
+                [HOLE_SPACING, -HOLE_SPACING, HOLE_SPACING * 2, 0, 0, 0],
+                [0, 0, 0, 0, 0, 0]
+            ];
+            for (const positions of demoStates) {
+                if (cancelled()) break;
+                gameState.blocks.forEach((b, i) => {
+                    updateBlockState(b, {x: positions[i] || 0, transition: 'transform 0.5s ease', pinTime: 400});
+                });
+                refreshMatches();
+                await stepSleep(1500);
+            }
+        }
+
+        tutorialSearchDemo = false;
+    },
+
+    async searchPick(cancelled) {
+        clean();
+        tutorialSearchDemo = true;
+        tutorialText.textContent = 'Press the counter to open the list of matching locks and pick one to load its saved state.';
+
+        while (!cancelled()) {
+            setSearchOpen(false);
+            if (6 !== +countInput.value) {
+                countInput.value = 6;
+                renderBlocks();
+            }
+            resetBtn.click();
+            refreshMatches();
+            await stepSleep(800);
+            if (cancelled()) break;
+
+            positionArrowRelative(searchToggle, 15, -40);
+            await stepSleep(1000);
+            if (cancelled()) break;
+
+            pressButtonVisual(searchToggle);
+            await stepSleep(150);
+            releaseButtonVisual(searchToggle);
+            tutorialArrow.style.display = 'none';
+            setSearchOpen(true);
+            await stepSleep(1000);
+            if (cancelled()) break;
+
+            const firstItem = searchList.querySelector('.search-item');
+            if (firstItem) {
+                positionArrowRelative(firstItem, 10, -40);
+                await stepSleep(1200);
+                if (cancelled()) break;
+
+                tutorialArrow.style.display = 'none';
+                await stepSleep(3500);
+            } else {
+                await stepSleep(2000);
+                setSearchOpen(false);
+            }
+            if (cancelled()) break;
+            await stepSleep(1000);
+        }
+
+        updateMatchCount([])
+        tutorialSearchDemo = false;
+        setSearchOpen(false);
+    },
+
+    async autoPlay(cancelled) {
         clean();
         tutorialText.textContent = 'You can play the whole sequence automatically. Press the play button.';
         while (!cancelled()) {
@@ -448,7 +556,7 @@ const TUTORIAL_STEPS = {
         }
     },
 
-    async 8(cancelled) {
+    async share(cancelled) {
         clean();
         tutorialText.textContent = 'You can share your current lock with others by pressing the share button. Better if u share it in steam guide with comment where it stands for feature database';
         while (!cancelled()) {
@@ -462,7 +570,7 @@ const TUTORIAL_STEPS = {
 async function runTutorialStep(version) {
     clean();
 
-    const step = TUTORIAL_STEPS[tutorialStep];
+    const step = TUTORIAL_STEPS[currentStepName()];
     if (!step) {
         endTutorial();
         return;

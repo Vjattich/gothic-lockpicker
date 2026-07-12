@@ -146,7 +146,8 @@ const playback = {
     lastActiveStepEl: null
 };
 
-let isGuideActive = false
+let isGuideActive = false,
+    tutorialSearchDemo = false; //tutorial.js changes
 
 function setInitialState() {
     gameState.isMobile = 768 >= window.innerWidth;
@@ -250,7 +251,7 @@ searchCloseBtn.addEventListener('click', (e) => {
 
 
 function updateMatchCount(matches) {
-    if (isGuideActive) {
+    if (isGuideActive && !tutorialSearchDemo) {
         return;
     }
     const n = matches.length;
