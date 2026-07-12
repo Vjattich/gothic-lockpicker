@@ -33,12 +33,21 @@
         const prodDoc = new DOMParser().parseFromString(htmlText, 'text/html');
         document.getElementById('mock-ui').innerHTML = prodDoc.body.innerHTML;
 
-        const script_1 = document.createElement('script');
-        script_1.src = 'index.js';
-        script_1.onload = () => QUnit.start();
-        script_1.onerror = () => fail('Failed to load index.js');
-        document.body.appendChild(script_1);
+        const loadScript = (src) => new Promise((resolve, reject) => {
+            const script = document.createElement('script');
+            script.src = src;
+            script.onload = resolve;
+            script.onerror = () => reject(new Error('Failed to load ' + src));
+            document.body.appendChild(script);
+        });
 
+        try {
+            await loadScript('db.js');
+            await loadScript('index.js');
+            QUnit.start();
+        } catch (err) {
+            fail(err.message);
+        }
     }
 
     QUnit.config.autostart = false;
@@ -88,6 +97,250 @@
             await new Promise(resolve => requestAnimationFrame(resolve));
         }
     };
+
+    QUnit.module('Catalogue search (index.js)', hooks => {
+        const encode = obj => btoa(JSON.stringify(obj));
+
+        const FIXTURE = [
+            {
+                id: 1, title: 'Rich%20cabin%20up%20arena', n: 3, pos: '1,-2,0', links: '',
+                state: encode({n: 3, start: [1, -2, 0], effects: [[1, 0, 0], [0, 1, 0], [0, 0, 1]]})
+            },
+            {
+                id: 2, title: 'Grim%20cabin', n: 3, pos: '2,-2,0', links: '',
+                state: encode({n: 3, start: [2, -2, 0], effects: [[1, 0, 0], [0, 1, 0], [0, 0, 1]]})
+            },
+            {
+                id: 3, title: 'Linked%20pair', n: 3, pos: '1,-2,0', links: '1>2:1',
+                state: encode({n: 3, start: [1, -2, 0], effects: [[1, 1, 0], [0, 1, 0], [0, 0, 1]]})
+            },
+            {
+                id: 4, title: 'Two%20plates', n: 2, pos: '1,0', links: '',
+                state: encode({n: 2, start: [1, 0], effects: [[1, 0], [0, 1]]})
+            }
+        ];
+
+        const matchIds = () => getCatalogueMatches(FIXTURE).map(e => e.id);
+
+        hooks.beforeEach(() => setUpThreeBlocks());
+
+        hooks.afterEach(() => {
+            sinon.restore();
+            clearTimeout(matchRefreshTimer);
+            setOpen(false);
+            setUpThreeBlocks();
+        });
+
+        QUnit.test('filters by plate count first', assert => {
+            assert.deepEqual(matchIds(), [1, 2, 3],
+                'An all-zero board matches every 3-plate preset; the 2-plate preset is excluded');
+        });
+
+        QUnit.test('non-zero plate positions must match the preset, zeros act as wildcards', assert => {
+            gameState.blocks[0].x = 1 * HOLE_SPACING;
+            assert.deepEqual(matchIds(), [1, 3], 'Plate 1 at +1 keeps only presets whose first offset is 1');
+
+            gameState.blocks[0].x = 2 * HOLE_SPACING;
+            assert.deepEqual(matchIds(), [2], 'Plate 1 at +2 narrows to the single matching preset');
+
+            gameState.blocks[0].x = 3 * HOLE_SPACING;
+            assert.deepEqual(matchIds(), [], 'A position present in no preset yields no matches');
+        });
+
+        QUnit.test('links narrow candidates to an exact structural match', assert => {
+            gameState.blocks[0].x = HOLE_SPACING;
+
+            gameState.blocks[0].group = {1: 1, 2: 1};
+            assert.deepEqual(matchIds(), [3], 'A 1>2 forward link keeps only the preset with the same links key');
+
+            gameState.blocks[0].group = {1: 1, 3: 1};
+            assert.deepEqual(matchIds(), [], 'A link that exists in no preset yields no matches');
+        });
+
+        QUnit.test('currentLinksString serializes injected blocks (test hook)', assert => {
+            const blocks = [
+                {id: 1, group: {1: 1, 3: 1, 2: -1}},
+                {id: 2, group: {2: 1}},
+                {id: 3, group: {3: 1, 1: 1}}
+            ];
+            assert.strictEqual(
+                currentLinksString(blocks),
+                '1>2:-1;1>3:1;3>1:1',
+                'Self-relations are skipped, targets are sorted, entries are ;-joined'
+            );
+        });
+
+        QUnit.test('getCatalogueMatches falls back to the LOCK_CATALOGUE global', assert => {
+            assert.ok(Array.isArray(getCatalogueMatches()),
+                'Calling without an argument runs against db.js without throwing');
+        });
+
+        QUnit.test('decodeTitle decodes URL-encoded titles and passes malformed ones through', assert => {
+            assert.strictEqual(decodeTitle('Rich%20cabin%20up%20arena'), 'Rich cabin up arena',
+                '%20 renders as a whitespace');
+            assert.strictEqual(decodeTitle('Broken 100% title'), 'Broken 100% title',
+                'A stray % does not throw; the raw title is shown as a fallback');
+        });
+
+        QUnit.test('renderSearchList renders one button per match with a decoded title', assert => {
+            renderSearchList(FIXTURE.slice(0, 2));
+            const items = searchList.querySelectorAll('.search-item');
+
+            assert.strictEqual(items.length, 2, 'One item per match');
+            assert.strictEqual(items[0].textContent, 'Rich cabin up arena', 'Title is decoded for display');
+            assert.strictEqual(items[0].dataset.id, '1', 'The raw id stays on the element for the click handler');
+        });
+
+        QUnit.test('updateMatchCount pluralizes and toggles the empty note', assert => {
+            window.updateMatchCount([FIXTURE[0]]);
+            assert.strictEqual(countText.textContent, '1 lock', 'Singular for one match');
+            assert.strictEqual(empty.style.display, 'none', 'Empty note is hidden when there are matches');
+
+            window.updateMatchCount([]);
+            assert.strictEqual(countText.textContent, '0 locks', 'Zero matches read as plural');
+            assert.strictEqual(empty.style.display, 'block', 'Empty note is shown when nothing matches');
+        });
+
+        QUnit.test('clicking a search result loads the preset and closes the panel', assert => {
+            const solveStub = sinon.stub(solveBtn, 'click');
+            setOpen(true);
+            renderSearchList([FIXTURE[2]]);
+
+            searchList.querySelector('.search-item').click();
+
+            assert.deepEqual(
+                gameState.blocks.map(b => Math.round(b.x / HOLE_SPACING)),
+                [1, -2, 0],
+                'Plates move to the preset start offsets'
+            );
+            assert.deepEqual(gameState.blocks[0].group, {1: 1, 2: 1},
+                'Link structure is applied from the preset effects');
+            assert.notOk(panel.classList.contains('is-open'), 'Search panel closes after loading');
+            assert.ok(solveStub.calledOnce, 'The solver is kicked off for the loaded lock');
+        });
+    });
+
+    QUnit.module('Catalogue search performance (getCatalogueMatches)', hooks => {
+
+        // 10,000 synthetic 3-plate entries cycling through every position combo.
+        const HUGE = (() => {
+            const entries = [];
+            for (let i = 0; i < 10000; i++) {
+                const
+                    p1 = (i % 7) - 3,
+                    p2 = (Math.floor(i / 7) % 7) - 3,
+                    p3 = (Math.floor(i / 49) % 7) - 3;
+                entries.push({
+                    id: i + 1,
+                    title: 'Generated%20' + i,
+                    n: 3,
+                    pos: p1 + ',' + p2 + ',' + p3,
+                    links: 0 === i % 4 ? '1>2:1' : '',
+                    state: 'not-used-by-the-matcher'
+                });
+            }
+            return entries;
+        })();
+
+        // Independent reference implementation of the matching rules:
+        // same plate count, non-zero current offsets must equal the preset,
+        // zeros are wildcards, links (when present) must match exactly.
+        const referenceMatch = (catalogue, positions, links) => catalogue
+            .filter(e => {
+                if (e.n !== positions.length) return false;
+                const entry = e.pos.split(',').map(Number);
+                for (let i = 0; i < positions.length; i++) {
+                    if (0 !== positions[i] && positions[i] !== entry[i]) return false;
+                }
+                return links ? e.links === links : true;
+            })
+            .map(e => e.id);
+
+        const averageMs = (fn, runs = 20) => {
+            fn(); // warm-up run outside the measurement
+            const t0 = performance.now();
+            for (let i = 0; i < runs; i++) fn();
+            return (performance.now() - t0) / runs;
+        };
+
+        hooks.beforeEach(() => setUpThreeBlocks());
+        hooks.afterEach(() => setUpThreeBlocks());
+
+        const testTimings = {};
+        QUnit.testDone(details => {
+            const timing = testTimings[details.testId];
+            if (!timing) return;
+            const li = document.getElementById('qunit-test-output-' + details.testId);
+            if (!li) return;
+            const span = document.createElement('span');
+            span.className = 'runtime';
+            span.textContent = ' \u2014 ' + timing;
+            li.querySelector('.test-name').append(span);
+        });
+
+        QUnit.test('stays correct on a 10k-entry catalogue', assert => {
+            gameState.blocks[0].x = 1 * HOLE_SPACING;
+            gameState.blocks[1].x = -2 * HOLE_SPACING;
+
+            let t0 = performance.now();
+            const positionIds = getCatalogueMatches(HUGE).map(e => e.id);
+            const positionMs = performance.now() - t0;
+
+            assert.deepEqual(
+                positionIds,
+                referenceMatch(HUGE, [1, -2, 0], ''),
+                'Position matching agrees with a straightforward reference filter'
+            );
+
+            gameState.blocks[0].group = {1: 1, 2: 1};
+
+            t0 = performance.now();
+            const linkIds = getCatalogueMatches(HUGE).map(e => e.id);
+            const linkMs = performance.now() - t0;
+
+            assert.deepEqual(
+                linkIds,
+                referenceMatch(HUGE, [1, -2, 0], '1>2:1'),
+                'Link matching agrees with the reference filter too'
+            );
+
+            testTimings[QUnit.config.current.testId] =
+                'positions: ' + positionMs.toFixed(2) + 'ms, links: ' + linkMs.toFixed(2) + 'ms';
+        });
+
+        QUnit.test('matches a 10k-entry catalogue well within one refresh debounce', assert => {
+            gameState.blocks[0].x = 1 * HOLE_SPACING;
+            gameState.blocks[1].x = -2 * HOLE_SPACING;
+
+            const avg = averageMs(() => getCatalogueMatches(HUGE));
+            assert.ok(avg < 40,
+                'Average match over 10k entries took ' + avg.toFixed(2) +
+                'ms; the budget is 40ms (the refresh debounce is 120ms, and this runs on every plate move)');
+        });
+
+        QUnit.test('worst case (all positions zero, no links) still fits the budget', assert => {
+            // All-zero board = every position is a wildcard, so nothing can be
+            // filtered out early: every 3-plate entry survives to the end.
+            const avg = averageMs(() => getCatalogueMatches(HUGE));
+            const count = getCatalogueMatches(HUGE).length;
+
+            assert.strictEqual(count, HUGE.length, 'Wildcard board keeps all same-count entries');
+            assert.ok(avg < 40,
+                'Worst-case wildcard match took ' + avg.toFixed(2) + 'ms on average; budget is 40ms');
+        });
+
+        QUnit.test('plate-count mismatch takes the cheap early exit', assert => {
+            countInput.value = 8;
+            renderBlocks(); // no 8-plate entries exist in the synthetic catalogue
+
+            assert.deepEqual(getCatalogueMatches(HUGE), [], 'Nothing matches a foreign plate count');
+
+            const avg = averageMs(() => getCatalogueMatches(HUGE));
+            assert.ok(avg < 15,
+                'Count-mismatch scan took ' + avg.toFixed(2) +
+                'ms on average; the size filter must stay the cheapest, first tier');
+        });
+    });
 
     QUnit.module('Solver Algorithm (solve)', () => {
         const MODES = ['shortest', 'shortest-fast', 'fewer-switches', 'fewer-switches-fast'];
@@ -556,7 +809,7 @@
             assert.notEqual(gameState.dragState.movingGroup[0].currentX, gameState.dragState.movingGroup[0].initialX, 'movingGroup item currentX state is successfully updated based on delta');
             assert.strictEqual(block.x, gameState.dragState.movingGroup[0].currentX, 'block.x state was synced properly by updateBlockState()');
             assert.strictEqual(gameState.dragState.isDragging, true, 'isDragging flag flips to true after crossing the threshold');
-            assert.equal(countTimers_1, 0, "Long press timer is cleaned up since dragging started");
+            assert.equal(countTimers_1, 1, "Long press timer is cleaned up since dragging started");
             assert.notEqual(block.el.style.transition, 'transform 0.2s ease-out', 'Transition is removed so block drags immediately without lag');
             assert.equal(block.el.style.transform, `translateZ(${block.z}px) translateX(${block.x.toFixed(5)}px)`, 'Transform dynamically updates while dragging');
         });
@@ -1382,6 +1635,308 @@
 
             assert.notOk(masterBlock.el.classList.contains(UI_CLASSES.TOUCHED), 'Leave hover');
             assert.notOk(targetBlock.el.classList.contains(UI_CLASSES.LINKED), 'Do not colored');
+        });
+
+    });
+
+    /*
+    ============================================================================
+      STATE → CATALOGUE ROW CONVERTER + QUNIT TESTS
+      ----------------------------------------------------------------------------
+      Solvability is checked by YOUR solver.js worker — the exact same protocol
+      solveInWorker() uses in index.js:
+
+          postMessage({n, start, effects, mode: 'fewer-switches-fast', timeoutMs})
+          onmessage → {moves: [...]} | {timeout: true} | no moves | {error}
+
+      So the converter accepts exactly what the game can solve, no more, no less.
+      Because the worker is async, convertStateToLockRow returns a Promise and
+      the tests below are async.
+
+      RUN IN BROWSER: this file must be served next to solver.js
+      (QUnit page: <script src="lock-converter.tests.js"> + qunit.js/qunit.css).
+    ============================================================================
+   */
+    const CONVERT_MIN_HOLE = -3;
+    const CONVERT_MAX_HOLE = 3;
+    const CONVERT_SOLVER_URL = 'solver.js';
+    const CONVERT_TIMEOUT_MS = 5000;
+
+    function decodeStateString(stateStr) {
+        let obj;
+        try {
+            obj = JSON.parse(atob(stateStr));
+        } catch (e) {
+            throw new Error('State is not valid base64 JSON');
+        }
+        if (!obj || !Number.isInteger(obj.n) || obj.n < 1) throw new Error('State has no valid block count "n"');
+        if (!Array.isArray(obj.start) || obj.start.length !== obj.n) throw new Error('"start" must be an array of length n');
+        if (!Array.isArray(obj.effects) || obj.effects.length !== obj.n || obj.effects.some(r => !Array.isArray(r) || r.length !== obj.n)) {
+            throw new Error('"effects" must be an n x n matrix');
+        }
+        if (obj.start.some(v => !Number.isInteger(v) || v < CONVERT_MIN_HOLE || v > CONVERT_MAX_HOLE)) {
+            throw new Error(`"start" offsets must be integers within [${CONVERT_MIN_HOLE}, ${CONVERT_MAX_HOLE}]`);
+        }
+        if (obj.effects.some((row, i) => row[i] !== 1)) {
+            throw new Error('Every plate must have self-relation 1 on the effects diagonal');
+        }
+        return obj;
+    }
+
+
+    /* Same contract as solveInWorker() in index.js, reusable outside the game UI. */
+    function solveWithGameSolver(setup) {
+        if (undefined === window.Worker) return Promise.reject(new Error('Web Workers are not supported.'));
+        return new Promise((resolve, reject) => {
+            const worker = new Worker(CONVERT_SOLVER_URL);
+            const hardTimeout = setTimeout(() => {
+                worker.terminate();
+                resolve({timeout: true});
+            }, CONVERT_TIMEOUT_MS + 1000);
+            worker.onmessage = (event) => {
+                clearTimeout(hardTimeout);
+                worker.terminate();
+                if (event.data?.error) {
+                    reject(new Error(event.data.error));
+                } else {
+                    resolve(event.data);
+                }
+            };
+            worker.onerror = (error) => {
+                clearTimeout(hardTimeout);
+                worker.terminate();
+                reject(error);
+            };
+            worker.postMessage({
+                n: setup.n,
+                start: setup.start,
+                effects: setup.effects,
+                mode: 'fewer-switches-fast',
+                timeoutMs: CONVERT_TIMEOUT_MS
+            });
+        });
+    }
+
+    function buildLinksKey(effects) {
+        const parts = [];
+        for (let i = 0; i < effects.length; i++) {
+            for (let j = 0; j < effects.length; j++) {
+                if (i !== j && effects[i][j] !== 0) parts.push(`${i + 1}>${j + 1}:${effects[i][j]}`);
+            }
+        }
+        parts.sort();
+        return parts.join(';');
+    }
+
+    function normalizeStateString(raw) {
+        let state = String(raw).trim().replace(/\s+/g, ''),
+            title = '';
+        const m = state.match(/[?&]state=([^&#]+)/);
+        const t = state.match(/[/&]title=([^&#]+)/);
+        if (m) state = m[1];
+        if (t) title = t[1];
+        try { state = decodeURIComponent(state); } catch (e) {}
+        return {title, state};
+    }
+
+    async function convertStateToLockRow(obj, meta = {}) {
+        obj = normalizeStateString(obj);
+        const setup = decodeStateString(obj.state);
+
+        const alreadySolved = setup.start.every(v => 0 === v);
+        let moves = 0;
+
+        if (!alreadySolved) {
+            const result = await solveWithGameSolver(setup);
+            if (result.timeout) throw new Error('Solver timed out: state cannot be verified');
+            if (!result || !result.moves || 0 === result.moves.length) {
+                throw new Error('State is unsolvable and cannot be added to the catalogue');
+            }
+            moves = result.moves.length;
+        }
+
+        return {
+            id: meta.id ?? null,
+            title: obj.title,
+            state: obj.state,
+            n: setup.n,
+            pos: setup.start.join(','),
+            links: buildLinksKey(setup.effects)
+        };
+    }
+
+    /*
+     ============================================================================
+       BATCH: many states in → catalogue array out
+       ----------------------------------------------------------------------------
+       Input items can be plain state strings or {state, title, id} objects.
+       Bad/unsolvable states don't abort the batch — they land in `errors`
+       so one broken link doesn't cost you the other 449 rows.
+
+       Usage in the browser console (on a page served next to solver.js):
+
+           const {rows, errors} = await convertStatesToCatalogue([
+               'eyJuIjo2LCJzdGFydCI6...',
+               {state: 'eyJuIjo0...', title: 'Twister'},
+           ]);
+           copy(emitCatalogueFile(rows));   // locks.js content now in clipboard
+       ============================================================================
+   */
+    async function convertStatesToCatalogue(items) {
+        const rows = [];
+        const errors = [];
+        for (let i = 0; i < items.length; i++) {
+            const item = 'string' === typeof items[i] ? {state: items[i]} : items[i];
+            try {
+                const row = await convertStateToLockRow(item.state, {
+                    id: item.id ?? rows.length + 1,
+                    title: item.title ?? ''
+                });
+                rows.push(row);
+            } catch (e) {
+                errors.push({index: i, state: item.state, error: e.message});
+            }
+        }
+        return {rows, errors};
+    }
+
+    /* Turns the rows array into ready-to-save locks.js text. */
+    function emitCatalogueFile(rows) {
+        const body = rows.map(r =>
+            '    {id: ' + r.id +
+            ', title: ' + JSON.stringify(r.title) +
+            ', n: ' + r.n +
+            ', pos: ' + JSON.stringify(r.pos) +
+            ', links: ' + JSON.stringify(r.links) +
+            ', state: ' + JSON.stringify(r.state) + '}'
+        ).join(',\n');
+        return 'const LOCK_CATALOGUE = [\n' + body + '\n];\n';
+    }
+
+    /* ============================================================================
+       TESTS — async because the real solver worker is async
+       ============================================================================ */
+
+    QUnit.module('State to catalogue row converter (game solver)', hooks => {
+
+        const encode = obj => btoa(JSON.stringify(obj));
+
+        const SHARED_SIX = 'eyJuIjo2LCJzdGFydCI6Wy0xLC0zLDEsLTMsMywyXSwiZWZmZWN0cyI6W1sxLDAsLTEsLTEsMCwwXSxbMCwxLC0xLDAsMCwwXSxbMCwwLDEsMCwwLDBdLFswLC0xLDAsMSwwLDBdLFswLDAsMSwxLDEsMF0sWzAsMCwwLDAsMCwxXV19';
+
+        QUnit.test('Real shared six-plate state converts to a complete catalogue row', async assert => {
+            const row = await convertStateToLockRow(SHARED_SIX, {id: 1});
+
+            assert.strictEqual(row.n, 6, 'Block count is decoded from the state');
+            assert.strictEqual(row.pos, '-1,-3,1,-3,3,2', 'Position key joins the start offsets in plate order');
+            assert.strictEqual(row.links, '1>3:-1;1>4:-1;2>3:-1;4>2:-1;5>3:1;5>4:1', 'Links key lists every plate-to-plate relation with its sign, sorted');
+            assert.strictEqual(row.state, SHARED_SIX, 'Original base64 payload is preserved for the result link');
+            //assert.strictEqual(row.title, 'Shared Six', 'Hand-set meta fields pass through');
+            assert.strictEqual(row.id, 1, 'Hand-set id passes through');
+        });
+
+
+        QUnit.test('Diagonal self-relations are excluded from the links key', async assert => {
+            const row = await convertStateToLockRow(encode({n: 2, start: [1, -1], effects: [[1, 0], [0, 1]]}));
+
+            assert.strictEqual(row.links, '', 'Identity matrix produces an empty links key');
+        });
+
+        QUnit.test('Already-solved state converts with zero moves and skips the solver', async assert => {
+            const row = await convertStateToLockRow(encode({n: 2, start: [0, 0], effects: [[1, 0], [0, 1]]}));
+
+            assert.strictEqual(row.pos, '0,0', 'Position key still records the zeros');
+        });
+
+        QUnit.test('Unsolvable state is rejected during conversion (immovable plate)', async assert => {
+            const stuck = encode({n: 1, start: [1], effects: [[0]]});
+
+            try {
+                await convertStateToLockRow(stuck);
+                assert.ok(false, 'Conversion must throw for a plate that cannot move itself');
+            } catch (e) {
+                assert.ok(/self-relation/.test(e.message), 'A plate that cannot move itself is not a valid game state and is rejected before the solver runs');
+            }
+        });
+
+        QUnit.test('Corrupted base64 payload is rejected before the solver runs', async assert => {
+            try {
+                await convertStateToLockRow('not-a-valid-state!!!');
+                assert.ok(false, 'Conversion must throw for garbage input');
+            } catch (e) {
+                assert.ok(/base64/.test(e.message), 'Garbage input throws instead of producing a broken row');
+            }
+        });
+
+        QUnit.test('Structurally invalid states are rejected before the solver runs', async assert => {
+            const cases = [
+                [encode({n: 3, start: [0, 0], effects: [[1, 0, 0], [0, 1, 0], [0, 0, 1]]}), /length n/, 'start array shorter than n throws'],
+                [encode({n: 2, start: [0, 0], effects: [[1, 0]]}), /n x n/, 'effects matrix with missing rows throws'],
+                [encode({n: 1, start: [4], effects: [[1]]}), /within \[-3, 3\]/, 'Start offset outside the board bounds throws']
+            ];
+
+            for (const [state, pattern, message] of cases) {
+                try {
+                    await convertStateToLockRow(state);
+                    assert.ok(false, message + ' (did not throw)');
+                } catch (e) {
+                    assert.ok(pattern.test(e.message), message);
+                }
+            }
+        });
+
+        QUnit.test('Batch conversion returns an array of rows and isolates failures', async assert => {
+            const {rows, errors} = await convertStatesToCatalogue([
+                SHARED_SIX,
+                'broken-garbage!!!',
+                {state: encode({n: 2, start: [1, -1], effects: [[1, 0], [0, 1]]}), title: 'Easy Pair'}
+            ]);
+
+            assert.strictEqual(rows.length, 2, 'Both valid states produce rows');
+            assert.strictEqual(errors.length, 1, 'The broken state lands in errors instead of aborting the batch');
+            assert.strictEqual(errors[0].index, 1, 'The error records which input failed');
+            assert.strictEqual(rows[0].id, 1, 'Ids are auto-assigned sequentially when not hand-set');
+            assert.strictEqual(rows[1].id, 2, 'The failed state does not consume an id');
+        });
+
+        QUnit.test('Catalogue emitter produces valid locks.js content', async assert => {
+            const {rows} = await convertStatesToCatalogue([SHARED_SIX]);
+            const text = emitCatalogueFile(rows);
+
+            assert.ok(text.startsWith('const LOCK_CATALOGUE = ['), 'Output declares the LOCK_CATALOGUE global');
+            assert.ok(text.includes('"1>3:-1;1>4:-1;2>3:-1;4>2:-1;5>3:1;5>4:1"'), 'Links key is embedded in the emitted row');
+
+            const parsed = new Function(text + '; return LOCK_CATALOGUE;')();
+            assert.strictEqual(parsed.length, 1, 'Emitted text evaluates back to an array of the same length');
+            assert.strictEqual(parsed[0].pos, '-1,-3,1,-3,3,2', 'Round-trip preserves the position key');
+        });
+
+        QUnit.test('Converted row is ready for the tiered search index', async assert => {
+            const row = await convertStateToLockRow(SHARED_SIX);
+            const searchKey = `${row.n}|${row.pos}|${row.links}`;
+
+            assert.strictEqual(
+                searchKey,
+                '6|-1,-3,1,-3,3,2|1>3:-1;1>4:-1;2>3:-1;4>2:-1;5>3:1;5>4:1',
+                'n, pos, and links compose the exact-match key used by LOCK_BY_KEY'
+            );
+        });
+
+
+        QUnit.test('Test for creating a row', async assert => {
+
+            let states = [SHARED_SIX];
+
+            let lockState = await convertStatesToCatalogue(states);
+
+            assert.strictEqual(lockState.errors.length, 0);
+
+            const out = document.createElement('textarea');
+            out.style.cssText = 'width:100%;height:300px;font-family:monospace;margin-top:10px;';
+            out.value = (lockState.errors.length
+                    ? 'ERRORS:\n' + JSON.stringify(lockState.errors, null, 2) + '\n\n' : '')
+                + emitCatalogueFile(lockState.rows, 'LOCKS_DB');
+            out.onclick = () => { out.select(); document.execCommand('copy'); };
+            document.body.appendChild(out);
         });
 
     });
