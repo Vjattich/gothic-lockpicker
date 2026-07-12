@@ -503,17 +503,21 @@ const TUTORIAL_STEPS = {
             releaseButtonVisual(searchToggle);
             tutorialArrow.style.display = 'none';
             setSearchOpen(true);
-            await stepSleep(1000);
+            searchPanel.classList.toggle('is-open', false);
+            searchPanel.classList.toggle('is-open-tutorial', true);
+            await stepSleep(800);
             if (cancelled()) break;
 
             const firstItem = searchList.querySelector('.search-item');
             if (firstItem) {
                 positionArrowRelative(firstItem, 10, -40);
-                await stepSleep(1200);
+                await stepSleep(1000);
+                firstItem.click();
+                searchPanel.classList.toggle('is-open-tutorial', false);
                 if (cancelled()) break;
 
                 tutorialArrow.style.display = 'none';
-                await stepSleep(3500);
+                await stepSleep(2500);
             } else {
                 await stepSleep(2000);
                 setSearchOpen(false);

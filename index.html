@@ -326,6 +326,14 @@
             transition: height 0.3s ease-out, padding 0.3s ease-out, visibility 0s;
         }
 
+        /*fix witputh copying*/
+        .search-panel.is-open-tutorial {
+            visibility: visible;
+            pointer-events: auto;
+            padding: 16px;
+            transition: height 0.3s ease-out, padding 0.3s ease-out, visibility 0s;
+        }
+
         .search-panel-header {
             display: flex;
             align-items: center;
@@ -1112,6 +1120,11 @@
 
             .search-panel.is-open {
                 height: calc(100dvh - 8em - env(safe-area-inset-top));
+                padding-bottom: calc(16px + env(safe-area-inset-bottom));
+            }
+
+            .search-panel.is-open-tutorial {
+                height: calc(100dvh - 15em - env(safe-area-inset-top));
                 padding-bottom: calc(16px + env(safe-area-inset-bottom));
             }
 
