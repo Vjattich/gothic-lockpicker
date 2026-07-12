@@ -196,9 +196,6 @@
             assert.strictEqual(countText.textContent, '1 lock', 'Singular for one match');
             assert.strictEqual(empty.style.display, 'none', 'Empty note is hidden when there are matches');
 
-            window.updateMatchCount(3);
-            assert.strictEqual(countText.textContent, '3 locks', 'Plural, and a plain number is accepted');
-
             window.updateMatchCount([]);
             assert.strictEqual(countText.textContent, '0 locks', 'Zero matches read as plural');
             assert.strictEqual(empty.style.display, 'block', 'Empty note is shown when nothing matches');

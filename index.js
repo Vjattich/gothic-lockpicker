@@ -1,3 +1,4 @@
+'use strict';
 const UI_CLASSES = {
     TOUCHED: 'touched',
     SELECTED: 'selected',
@@ -27,33 +28,32 @@ const ACTIONS = {
 
 const
     lock = document.getElementById('lock'),
+    controls = document.getElementById('controls'),
     sizeInput = document.getElementById('sizeInput'),
     countInput = document.getElementById('countInput'),
-    controls = document.getElementById('controls'),
-    resetBtn = document.getElementById('resetBtn'),
-    solveBtn = document.getElementById('solveBtn'),
     btnDecrease = document.getElementById('btnDecreaseBlocks'),
     btnIncrease = document.getElementById('btnIncreaseBlocks'),
+    inspectorRow = document.getElementById('inspectorRow'),
+    resetBtn = document.getElementById('resetBtn'),
+    solveBtn = document.getElementById('solveBtn'),
+    shareBtn = document.getElementById('shareBtn'),
+    steamGuideBtn = document.getElementById('steamGuideBtn'),
     prevBtn = document.getElementById('prevBtn'),
+    nextBtn = document.getElementById('nextBtn'),
     playBtn = document.getElementById('playBtn'),
     restartSeqBtn = document.getElementById('restartSeqBtn'),
-    nextBtn = document.getElementById('nextBtn'),
     stepControlsRow = document.getElementById('stepControlsRow'),
     squashLabel = document.getElementById('squashLabel'),
     squashMovesCheck = document.getElementById('squashMovesCheck'),
     statusMsg = document.getElementById('statusMsg'),
     solutionList = document.getElementById('solutionList'),
     expandBtn = document.getElementById('expandBtn'),
-    inspectorRow = document.getElementById('inspectorRow'),
-    shareBtn = document.getElementById('shareBtn'),
-    steamGuideBtn = document.getElementById('steamGuideBtn'),
-    line = document.getElementById('searchToggle'),
-    panel = document.getElementById('searchPanel'),
-    closeBtn = document.getElementById('searchClose'),
-    countText = document.getElementById('matchCountText'),
-    empty = document.getElementById('searchEmpty'),
-    searchList = document.getElementById('searchList')
-;
+    searchToggle = document.getElementById('searchToggle'),
+    searchPanel = document.getElementById('searchPanel'),
+    searchCloseBtn = document.getElementById('searchClose'),
+    matchCountText = document.getElementById('matchCountText'),
+    searchEmpty = document.getElementById('searchEmpty'),
+    searchList = document.getElementById('searchList');
 
 const
     PIN_RAISED = -10,
@@ -68,10 +68,13 @@ const
     SOLVE_TIMEOUT_MS = 5000,
     MAX_PLATES = 8,
     ONE_OVER_HOLE_SPACING = 1 / HOLE_SPACING,
+    SETUP_ANIMATION_MS = 350,
     PLATE_TEMPLATE = document.createElement('template');
 
+/* 2. Plate template -------------------------------------------------------- */
+
 (() => {
-    const renderPinBody = function () {
+    const renderPinBody = () => {
         let sidesHtml = '';
         for (let s = 0; s < 16; s++) {
             sidesHtml += `<div class="pin-side" style="transform: rotateZ(${s * 22.5}deg) translateY(-6px) rotateX(90deg)"></div>`;
@@ -90,49 +93,60 @@ const
 
     let tubeHtml = '';
     const corners = [
-        {class: 'tube-tr', startAngle: 0},
-        {class: 'tube-br', startAngle: 90},
-        {class: 'tube-bl', startAngle: 180},
-        {class: 'tube-tl', startAngle: 270}
+        {class: 'tube-tr', startAngle: 0, y: '-29.5px'},
+        {class: 'tube-br', startAngle: 90, y: '-29.5px'},
+        {class: 'tube-bl', startAngle: 180, y: '-29px'},
+        {class: 'tube-tl', startAngle: 270, y: '-29px'}
     ];
 
-    corners.forEach(corner => {
-        let Ydeg = '-30px';
-        if ('tube-tl' === corner.class || 'tube-bl' === corner.class) Ydeg = '-29px';
-        if ('tube-tr' === corner.class || 'tube-br' === corner.class) Ydeg = '-29.5px';
+    for (const corner of corners) {
         tubeHtml += `<div class="corner-tube ${corner.class}">`;
         for (let a = 7.5; a < 90; a += 15) {
-            tubeHtml += `<div class="tube-panel" style="transform: rotateZ(${corner.startAngle + a}deg) translateY(${Ydeg}) rotateX(-90deg)"></div>`;
+            tubeHtml += `<div class="tube-panel" style="transform: rotateZ(${corner.startAngle + a}deg) translateY(${corner.y}) rotateX(-90deg)"></div>`;
         }
         tubeHtml += '</div>';
-    });
+    }
 
     PLATE_TEMPLATE.innerHTML = `<div class="plate glow"><div class="front-face"></div><div class="top-face">${holesHtml}</div><div class="right-face"></div><div class="bottom-face"></div><div class="left-face"></div>${tubeHtml}</div>`;
 })();
 
+/* 3. Game state -------------------------------------------------------------- */
+
 const gameState = {
-        isInteracted: false,
-        isRender: false,
-        blocks: [],
-        activeLinkerId: null,
-        dragState: {
-            activePlate: null,
-            startInputX: 0,
-            movingGroup: [],
-            isDragging: false,
-            longPressTimer: null,
-            hasMoved: false,
-            rafId: null,
-            currentClientX: 0,
-        },
-        isMobile: false,
-        lastTouchTime: 0,
-        lastAction: null,
-        isHovering: false,
-        hoveredElements: [],
-        glowingHoles: []
+    isInteracted: false,
+    isRender: false,
+    blocks: [],
+    activeLinkerId: null,
+    dragState: {
+        activePlate: null,
+        startInputX: 0,
+        movingGroup: [],
+        isDragging: false,
+        longPressTimer: null,
+        hasMoved: false,
+        rafId: null,
+        currentClientX: 0
     },
-    pinchState = {initialDistance: 0, initialScale: 0, lastScale: 0};
+    isMobile: false,
+    lastTouchTime: 0,
+    lastAction: null,
+    isHovering: false,
+    hoveredElements: [],
+    glowingHoles: []
+};
+
+const pinchState = {initialDistance: 0, initialScale: 0, lastScale: 0};
+
+const playback = {
+    solution: null,
+    stepIndex: 0,
+    isPlaying: false,
+    moveMap: [],
+    initialSetup: null,
+    lastActiveStepEl: null
+};
+
+let isGuideActive = false
 
 function setInitialState() {
     gameState.isMobile = 768 >= window.innerWidth;
@@ -146,7 +160,9 @@ function setInitialState() {
 
 setInitialState();
 
-//antifreez
+if (gameState.isMobile) squashMovesCheck.checked = false;
+
+// Debounced resize
 let resizeTimer = null;
 window.addEventListener('resize', () => {
     clearTimeout(resizeTimer);
@@ -158,75 +174,98 @@ window.addEventListener('resize', () => {
     }, 150);
 });
 
-if (gameState.isMobile) squashMovesCheck.checked = false;
+function clearPlateStateClasses() {
+    gameState.blocks.forEach(b => b.el.classList.remove(
+        UI_CLASSES.TOUCHED, UI_CLASSES.SELECTED, UI_CLASSES.LINKED, UI_CLASSES.RINKED
+    ));
+}
 
-const playback = {
-    solution: null,
-    stepIndex: 0,
-    isPlaying: false,
-    moveMap: [],
-    initialSetup: null,
-    lastActiveStepEl: null
-};
+const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+function getClientX(e) {
+    return e.touches && e.touches.length > 0 ? e.touches[0].clientX : e.clientX;
+}
+
+function vibrate(duration) {
+    if (!gameState.isInteracted) return;
+
+    if (navigator.vibrate) navigator.vibrate(duration);
+
+    if (!navigator.getGamepads) return;
+    for (const gamepad of navigator.getGamepads()) {
+        if (gamepad && gamepad.vibrationActuator && typeof gamepad.vibrationActuator.playEffect === 'function') {
+            gamepad.vibrationActuator.playEffect('dual-rumble', {
+                startDelay: 0,
+                duration: duration * 4,
+                weakMagnitude: 1.0,
+                strongMagnitude: 0.0
+            }).catch(() => {});
+            break;
+        }
+    }
+}
+
+/* 4. Search panel (matching saved locks) -------------------------------------- */
 
 function sizeSearchPanel() {
-    if (!panel.classList.contains('is-open')) return;
+    if (!searchPanel.classList.contains('is-open')) return;
     if (gameState.isMobile) {
-        panel.style.height = ''; // mobile: bottom sheet height comes from CSS
+        searchPanel.style.height = ''; // mobile: bottom sheet height comes from CSS
         return;
     }
     const
-        rect = panel.getBoundingClientRect(),
+        rect = searchPanel.getBoundingClientRect(),
         bottomPadding = window.innerHeight * 0.05,
         availableHeight = window.innerHeight - rect.top - bottomPadding;
-    panel.style.height = `${Math.max(availableHeight, 200)}px`;
+    searchPanel.style.height = `${Math.max(availableHeight, 200)}px`;
 }
 
-function setOpen(open) {
-    panel.classList.toggle('is-open', open);
-    line.classList.toggle('is-open', open);
-    line.setAttribute('aria-expanded', open ? 'true' : 'false');
+function setSearchOpen(open) {
+    searchPanel.classList.toggle('is-open', open);
+    searchToggle.classList.toggle('is-open', open);
+    searchToggle.setAttribute('aria-expanded', open ? 'true' : 'false');
     if (open) {
         refreshMatches();
         sizeSearchPanel();
     } else {
-        panel.style.height = '';
+        searchPanel.style.height = '';
     }
 }
 
-function toggleOpen() {
-    setOpen(!panel.classList.contains('is-open'));
+function toggleSearchOpen() {
+    setSearchOpen(!searchPanel.classList.contains('is-open'));
 }
 
-line.addEventListener('click', toggleOpen);
-line.addEventListener('keydown', function (e) {
+searchToggle.addEventListener('click', toggleSearchOpen);
+searchToggle.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' || e.key === ' ') {
         e.preventDefault();
-        toggleOpen();
+        toggleSearchOpen();
     }
 });
-closeBtn.addEventListener('click', function (e) {
+searchCloseBtn.addEventListener('click', (e) => {
     e.stopPropagation();
-    setOpen(false);
+    setSearchOpen(false);
 });
 
-window.updateMatchCount = function (matches) {
-    const n = Array.isArray(matches) ? matches.length : (matches | 0);
-    countText.textContent = n + (n === 1 ? ' lock' : ' locks');
-    line.classList.toggle('has-matches', n > 0);
-    empty.style.display = n > 0 ? 'none' : 'block';
-};
+
+function updateMatchCount(matches) {
+    if (isGuideActive) {
+        return;
+    }
+    const n = matches.length;
+    matchCountText.textContent = n + (1 === n ? ' lock' : ' locks');
+    searchToggle.classList.toggle('has-matches', n > 0);
+    searchEmpty.style.display = n > 0 ? 'none' : 'block';
+}
 
 function currentPosString() {
     return gameState.blocks.map(b => Math.round(b.x / HOLE_SPACING));
 }
 
-function currentLinksString(
-    //todo adapt for tests
-    blocks
-) {
+function currentLinksString(blocks = gameState.blocks) {
     const parts = [];
-    for (const b of blocks || gameState.blocks) {
+    for (const b of blocks) {
         const targets = Object.keys(b.group)
             .map(Number)
             .filter(t => t !== b.id)
@@ -236,11 +275,9 @@ function currentLinksString(
     return parts.join(';');
 }
 
-// --- Matcher: size -> position -> connections, cheapest filter first --------
-
 function getCatalogueMatches(catalogue) {
     const source = catalogue
-        || (typeof LOCK_CATALOGUE !== 'undefined' ? LOCK_CATALOGUE : []);
+        || ('undefined' !== typeof LOCK_CATALOGUE ? LOCK_CATALOGUE : []);
 
     let candidates = source.filter(e => e.n === gameState.blocks.length);
     if (0 === candidates.length) return candidates;
@@ -248,11 +285,10 @@ function getCatalogueMatches(catalogue) {
     const currentPositioning = currentPosString();
 
     candidates = candidates.filter(e => {
-
         const entry = e.pos.split(',');
 
         let seems = true,
-            isAllZero = true
+            isAllZero = true;
         for (let i = 0; i < currentPositioning.length; i++) {
             const pos = currentPositioning[i];
 
@@ -271,24 +307,25 @@ function getCatalogueMatches(catalogue) {
     });
 
     const links = currentLinksString();
+    if (!links) return candidates;
 
-    if (!links) {
-        return candidates;
-    }
-
-    candidates = candidates.filter(e => e.links === links);
-    if (0 === candidates.length) return candidates;
-
-    return candidates;
-}
-
-function refreshMatches() {
-    const matches = getCatalogueMatches();
-    window.updateMatchCount(matches);
-    renderSearchList(matches);
+    return candidates.filter(e => e.links === links);
 }
 
 let lastMatches = [];
+
+function refreshMatches() {
+    const matches = getCatalogueMatches();
+    updateMatchCount(matches);
+    renderSearchList(matches);
+}
+
+let matchRefreshTimer = null;
+
+function scheduleMatchRefresh() {
+    clearTimeout(matchRefreshTimer);
+    matchRefreshTimer = setTimeout(refreshMatches, 120);
+}
 
 function decodeTitle(title) {
     try {
@@ -319,11 +356,35 @@ searchList.addEventListener('click', (e) => {
     if (entry) loadCatalogueLock(entry);
 });
 
+function loadCatalogueLock(entry) {
+    const setup = decodeSetup(entry.state);
+    if (!setup) {
+        console.error('Bad catalogue state for lock #' + entry.id);
+        return;
+    }
 
-let matchRefreshTimer = null;
-function scheduleMatchRefresh() {
-    clearTimeout(matchRefreshTimer);
-    matchRefreshTimer = setTimeout(refreshMatches, 120);
+    setSearchOpen(false);
+    applySetup(setup, true);
+    scheduleMatchRefresh();
+    solveBtn.click();
+}
+
+/* 5. Setup encode / decode / share --------------------------------------------- */
+
+/** Snapshot of the board: block count, positions (hole units), link matrix. */
+function compactSetup() {
+    const
+        n = gameState.blocks.length,
+        start = gameState.blocks.map(b => Math.round(b.x / HOLE_SPACING)),
+        effects = [];
+    for (let i = 0; i < n; i++) {
+        const row = [];
+        for (let j = 0; j < n; j++) {
+            row.push(gameState.blocks[i].group[j + 1] || 0);
+        }
+        effects.push(row);
+    }
+    return {n, start, effects};
 }
 
 function decodeSetup(encoded) {
@@ -336,8 +397,6 @@ function decodeSetup(encoded) {
     }
 }
 
-const SETUP_ANIMATION_MS = 350;
-
 function applySetup(setup, animate = false) {
     gameState.isRender = true;
     try {
@@ -345,10 +404,8 @@ function applySetup(setup, animate = false) {
         gameState.activeLinkerId = null;
 
         if (animate && gameState.blocks.length === setup.n) {
-            // keep existing plates so they can slide from the current state
-            gameState.blocks.forEach(b => b.el.classList.remove(
-                UI_CLASSES.TOUCHED, UI_CLASSES.SELECTED, UI_CLASSES.LINKED, UI_CLASSES.RINKED
-            ));
+            // Keep existing plates so they can slide from the current state
+            clearPlateStateClasses();
         } else {
             animate = false;
             gameState.blocks = [];
@@ -382,72 +439,53 @@ function applySetup(setup, animate = false) {
     }
 }
 
-function loadCatalogueLock(entry) {
-    const setup = decodeSetup(entry.state);
+function loadFromURL() {
+    const stateParam = new URLSearchParams(window.location.search).get('state');
+    if (!stateParam) return false;
+
+    const setup = decodeSetup(stateParam);
     if (!setup) {
-        console.error('Bad catalogue state for lock #' + entry.id);
-        return;
+        console.error('Failed to load shared state.');
+        return false;
     }
 
-    setOpen(false);
-    applySetup(setup, true);
-    scheduleMatchRefresh();
+    applySetup(setup);
+
+    const cleanUrl = new URL(window.location.href);
+    cleanUrl.searchParams.delete('state');
+    window.history.replaceState({}, document.title, cleanUrl.toString());
     solveBtn.click();
+    return true;
 }
+
+let shareStatusTimeout;
+
+shareBtn.addEventListener('click', () => {
+    const
+        value = playback.initialSetup || compactSetup(),
+        url = new URL(window.location.href);
+
+    url.searchParams.set('state', btoa(JSON.stringify(value)));
+
+    navigator.clipboard.writeText(url.toString()).then(() => {
+        setStatus('Share link copied to clipboard!', 'success');
+        clearTimeout(shareStatusTimeout);
+        shareStatusTimeout = setTimeout(() => {
+            if ('Share link copied to clipboard!' === statusMsg.textContent) {
+                setStatus('', 'info');
+            }
+        }, 1500);
+    }).catch(() => {
+        setStatus('Failed to copy link.', 'error');
+    });
+});
+
+/* 6. Solver integration & playback ---------------------------------------------- */
 
 function setStatus(text, type = 'info') {
     statusMsg.textContent = text;
     statusMsg.className = `status-message status-${type}`;
-    const row = statusMsg.closest('.play-status-row');
-    if ('' === text) {
-        row.classList.remove(UI_CLASSES.SHOW_STRETCH);
-    } else {
-        row.classList.add(UI_CLASSES.SHOW_STRETCH);
-    }
-}
-
-function clearSolutionUI() {
-    playback.solution = null;
-    playback.stepIndex = 0;
-    playback.isPlaying = false;
-    playback.initialSetup = null;
-    playBtn.style.display = 'none';
-    playBtn.textContent = '▶ Play';
-    restartSeqBtn.style.display = 'none';
-    stepControlsRow.classList.remove(UI_CLASSES.SHOW_STRETCH);
-    squashLabel.classList.remove(UI_CLASSES.SHOW_STRETCH);
-    setStatus('', 'info');
-    solveBtn.disabled = false;
-
-    gameState.blocks.forEach(b => b.el.classList.remove(UI_CLASSES.TOUCHED, UI_CLASSES.SELECTED, UI_CLASSES.LINKED, UI_CLASSES.RINKED));
-
-    gameState.glowingHoles.forEach(h => {
-        clearTimeout(h.glowTimeoutId);
-        h.glowTimeoutId = null;
-        h.classList.remove(UI_CLASSES.GLOW);
-    });
-    gameState.glowingHoles = [];
-
-    solutionList.innerHTML = '';
-    playback.lastActiveStepEl = null;
-    if (solutionList.classList.contains(UI_CLASSES.EXPANDED)) toggleExpandList(false);
-}
-
-function compactSetup() {
-    const
-        n = gameState.blocks.length,
-        start = gameState.blocks.map(b => Math.round(b.x / HOLE_SPACING)),
-        effects = [];
-    for (let i = 0; i < n; i++) {
-        const row = [];
-        for (let j = 0; j < n; j++) {
-            const targetId = j + 1;
-            const relation = gameState.blocks[i].group[targetId] || 0;
-            row.push(relation);
-        }
-        effects.push(row);
-    }
-    return {n, start, effects};
+    statusMsg.closest('.play-status-row').classList.toggle(UI_CLASSES.SHOW_STRETCH, '' !== text);
 }
 
 function solveInWorker() {
@@ -483,194 +521,32 @@ function solveInWorker() {
     });
 }
 
-const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+function clearSolutionUI() {
+    playback.solution = null;
+    playback.stepIndex = 0;
+    playback.isPlaying = false;
+    playback.initialSetup = null;
+    playBtn.style.display = 'none';
+    playBtn.textContent = '▶ Play';
+    restartSeqBtn.style.display = 'none';
+    stepControlsRow.classList.remove(UI_CLASSES.SHOW_STRETCH);
+    squashLabel.classList.remove(UI_CLASSES.SHOW_STRETCH);
+    setStatus('', 'info');
+    solveBtn.disabled = false;
 
-function jumpToStep(targetIndex) {
-    targetIndex = targetIndex - 1;
-    if (null === playback.solution || playback.isPlaying) return;
+    clearPlateStateClasses();
 
-    const targetX = gameState.blocks.map(b => b.x);
-
-    const simulate = (move, reverse) => {
-        const
-            primaryBlock = gameState.blocks[move.plate - 1],
-            stepShift = ('left' === move.direction) === reverse ? HOLE_SPACING : -HOLE_SPACING;
-        for (const i in primaryBlock.group) {
-            const id = +i;
-            if (!gameState.blocks[id - 1]) continue;
-            targetX[id - 1] = Math.max(-MAX_BOUND, Math.min(MAX_BOUND, targetX[id - 1] + stepShift * primaryBlock.group[id]));
-        }
-    };
-
-    while (playback.stepIndex < targetIndex) {
-        simulate(playback.solution[playback.stepIndex], false);
-        playback.stepIndex++;
-    }
-    while (playback.stepIndex > targetIndex) {
-        simulate(playback.solution[playback.stepIndex - 1], true);
-        playback.stepIndex--;
-    }
-
-    gameState.blocks.forEach((b, i) => {
-        if (b.x === targetX[i]) return;
-        updateBlockState(b, { x: targetX[i], transition: 'transform 0.2s ease-out', pinTime: 200 });
+    gameState.glowingHoles.forEach(h => {
+        clearTimeout(h.glowTimeoutId);
+        h.glowTimeoutId = null;
+        h.classList.remove(UI_CLASSES.GLOW);
     });
+    gameState.glowingHoles = [];
 
-    updatePlaybackUI();
-}
-
-function setActiveStep(el) {
-    if (playback.lastActiveStepEl === el) return;
-    if (playback.lastActiveStepEl) playback.lastActiveStepEl.classList.remove(UI_CLASSES.ACTIVE_STEP);
-    if (el) el.classList.add(UI_CLASSES.ACTIVE_STEP);
-    playback.lastActiveStepEl = el;
-}
-
-function updatePlaybackUI() {
-    if (null === playback.solution) return;
-
-    prevBtn.disabled = (0 === playback.stepIndex) || playback.isPlaying;
-    nextBtn.disabled = (playback.stepIndex === playback.solution.length) || playback.isPlaying;
-    playBtn.disabled = (playback.stepIndex === playback.solution.length);
-    restartSeqBtn.disabled = playback.isPlaying;
-    solveBtn.disabled = playback.isPlaying;
-
-    const scrollBehavior = playback.isPlaying ? 'auto' : 'smooth';
-
-    gameState.blocks.forEach(b => b.el.classList.remove(UI_CLASSES.TOUCHED, UI_CLASSES.SELECTED, UI_CLASSES.LINKED, UI_CLASSES.RINKED));
-
-    if (playback.stepIndex < playback.solution.length) {
-        const activeDomIndex = playback.moveMap[playback.stepIndex];
-        if (undefined !== activeDomIndex && solutionList.children[activeDomIndex]) {
-            const activeEl = solutionList.children[activeDomIndex];
-            setActiveStep(activeEl);
-            if (0 === playback.stepIndex) {
-                solutionList.scrollTop = 0;
-            } else {
-                activeEl.scrollIntoView({behavior: scrollBehavior, block: 'nearest'});
-            }
-        }
-
-        const nextMove = playback.solution[playback.stepIndex];
-        const activeBlock = gameState.blocks[nextMove.plate - 1];
-        const elementsToGlow = [];
-
-        if (activeBlock) {
-            if ('right' === nextMove.direction) {
-                activeBlock.el.classList.add(UI_CLASSES.LINKED);
-            } else {
-                activeBlock.el.classList.add(UI_CLASSES.RINKED);
-            }
-
-            let moveCount = 0;
-            if (nextMove.count) {
-                moveCount = nextMove.count;
-            } else {
-                for (let i = playback.stepIndex; i < playback.solution.length; i++) {
-                    if (playback.solution[i].plate === nextMove.plate && playback.solution[i].direction === nextMove.direction) {
-                        moveCount++;
-                    } else {
-                        break;
-                    }
-                }
-            }
-
-            const currentHoleOffset = Math.round(activeBlock.x / HOLE_SPACING);
-            const currentPinHole = 3 - currentHoleOffset;
-            const step = moveCount;
-            const targetHoleIndex = nextMove.direction === 'right' ? currentPinHole - step : currentPinHole + step;
-
-            if (targetHoleIndex >= 0 && targetHoleIndex <= 6) {
-                const holes = activeBlock.el.querySelectorAll(`.${UI_CLASSES.HOLE}`);
-                if (holes[targetHoleIndex]) elementsToGlow.push(holes[targetHoleIndex]);
-            }
-        }
-
-        gameState.glowingHoles.forEach(h => {
-            if (!elementsToGlow.includes(h) && !h.glowTimeoutId) {
-                h.glowTimeoutId = setTimeout(() => {
-                    h.classList.remove(UI_CLASSES.GLOW);
-                    h.glowTimeoutId = null;
-                    gameState.glowingHoles = gameState.glowingHoles.filter(glowing => glowing !== h);
-                }, 250);
-            }
-        });
-
-        elementsToGlow.forEach(h => {
-            if (h.glowTimeoutId) {
-                clearTimeout(h.glowTimeoutId);
-                h.glowTimeoutId = null;
-            }
-            if (!h.classList.contains(UI_CLASSES.GLOW)) {
-                h.classList.add(UI_CLASSES.GLOW);
-                if (!gameState.glowingHoles.includes(h)) {
-                    gameState.glowingHoles.push(h);
-                }
-            }
-        });
-
-    } else if (0 < playback.solution.length) {
-        gameState.glowingHoles.forEach(h => {
-            if (!h.glowTimeoutId) {
-                h.glowTimeoutId = setTimeout(() => {
-                    h.classList.remove(UI_CLASSES.GLOW);
-                    h.glowTimeoutId = null;
-                    gameState.glowingHoles = gameState.glowingHoles.filter(glowing => glowing !== h);
-                }, 250);
-            }
-        });
-        const lastDomIndex = playback.moveMap[playback.solution.length - 1];
-        if (undefined !== lastDomIndex && solutionList.children[lastDomIndex]) {
-            setActiveStep(solutionList.children[lastDomIndex]);
-            solutionList.children[lastDomIndex].scrollIntoView({behavior: 'smooth', block: 'nearest'});
-        }
-    }
-}
-
-function renderSolutionList() {
-    if (null === playback.solution) return;
+    solutionList.innerHTML = '';
     playback.lastActiveStepEl = null;
-    playback.moveMap = [];
-    const movesToRender = [];
-    let domIndex = 0;
-    if (squashMovesCheck.checked) {
-        playback.solution.forEach((m, i) => {
-            const last = movesToRender[movesToRender.length - 1];
-            if (last && last.plate === m.plate && last.direction === m.direction) {
-                last.count++;
-                last.targetIndex = i + 1;
-                playback.moveMap[i] = domIndex - 1;
-            } else {
-                movesToRender.push({...m, count: 1, targetIndex: i + 1});
-                playback.moveMap[i] = domIndex;
-                domIndex++;
-            }
-        });
-    } else {
-        playback.solution.forEach((m, i) => {
-            movesToRender.push({...m, count: 1, targetIndex: i + 1});
-            playback.moveMap[i] = i;
-        });
-    }
-    const fragment = document.createDocumentFragment();
-    movesToRender.forEach((m, index) => {
-        const step = document.createElement('div');
-        const icon = 'left' === m.direction ? '←' : '→';
-        let text = `${index + 1}. Block ${m.plate} ${icon} ${m.direction.toUpperCase()}`;
-        if (1 < m.count) text += ` (x${m.count})`;
-        step.textContent = text;
-        step.style.cursor = 'pointer';
-        step.dataset.target = m.targetIndex;
-        fragment.appendChild(step);
-    });
-    solutionList.replaceChildren(fragment);
-    updatePlaybackUI();
+    if (solutionList.classList.contains(UI_CLASSES.EXPANDED)) toggleExpandList(false);
 }
-
-solutionList.addEventListener('click', (e) => {
-    const step = e.target.closest('[data-target]');
-    if (step) jumpToStep(+step.dataset.target);
-});
 
 solveBtn.addEventListener('click', async () => {
     const setup = compactSetup();
@@ -708,6 +584,105 @@ solveBtn.addEventListener('click', async () => {
         if (!playback.isPlaying) solveBtn.disabled = false;
     }
 });
+
+function applySingleMove(move, reverse = false) {
+    const
+        primaryBlock = gameState.blocks[move.plate - 1],
+        stepShift = ('left' === move.direction) === reverse ? HOLE_SPACING : -HOLE_SPACING;
+
+    Object.keys(primaryBlock.group).forEach(i => {
+        const
+            id = +i,
+            relativeDir = primaryBlock.group[id],
+            b = gameState.blocks[id - 1];
+        if (!b) return;
+        updateBlockState(b, {
+            x: Math.max(-MAX_BOUND, Math.min(MAX_BOUND, b.x + stepShift * relativeDir)),
+            transition: 'transform 0.2s ease-out',
+            pinTime: 200
+        });
+    });
+}
+
+function jumpToStep(targetIndex) {
+    targetIndex = targetIndex - 1;
+    if (null === playback.solution || playback.isPlaying) return;
+
+    const targetX = gameState.blocks.map(b => b.x);
+
+    const simulate = (move, reverse) => {
+        const
+            primaryBlock = gameState.blocks[move.plate - 1],
+            stepShift = ('left' === move.direction) === reverse ? HOLE_SPACING : -HOLE_SPACING;
+        for (const i in primaryBlock.group) {
+            const id = +i;
+            if (!gameState.blocks[id - 1]) continue;
+            targetX[id - 1] = Math.max(-MAX_BOUND, Math.min(MAX_BOUND, targetX[id - 1] + stepShift * primaryBlock.group[id]));
+        }
+    };
+
+    while (playback.stepIndex < targetIndex) {
+        simulate(playback.solution[playback.stepIndex], false);
+        playback.stepIndex++;
+    }
+    while (playback.stepIndex > targetIndex) {
+        simulate(playback.solution[playback.stepIndex - 1], true);
+        playback.stepIndex--;
+    }
+
+    gameState.blocks.forEach((b, i) => {
+        if (b.x === targetX[i]) return;
+        updateBlockState(b, {x: targetX[i], transition: 'transform 0.2s ease-out', pinTime: 200});
+    });
+
+    updatePlaybackUI();
+}
+
+function getNextSquashedIndex() {
+    if (null === playback.solution || playback.stepIndex >= playback.solution.length) return playback.stepIndex;
+    const currentMove = playback.solution[playback.stepIndex];
+    let nextIdx = playback.stepIndex + 1;
+    while (nextIdx < playback.solution.length) {
+        const move = playback.solution[nextIdx];
+        if (move.plate !== currentMove.plate || move.direction !== currentMove.direction) break;
+        nextIdx++;
+    }
+    return nextIdx + 1;
+}
+
+function getPrevSquashedIndex() {
+    if (null === playback.solution || playback.stepIndex <= 0) return playback.stepIndex;
+    const currentMove = playback.solution[playback.stepIndex - 1];
+    let prevIdx = playback.stepIndex - 1;
+    while (prevIdx > 0) {
+        const move = playback.solution[prevIdx - 1];
+        if (move.plate !== currentMove.plate || move.direction !== currentMove.direction) break;
+        prevIdx--;
+    }
+    return prevIdx + 1;
+}
+
+function stepForward(forceSquash = false) {
+    if (null === playback.solution || playback.isPlaying || playback.stepIndex >= playback.solution.length) return;
+    if (squashMovesCheck.checked || forceSquash) {
+        jumpToStep(getNextSquashedIndex());
+    } else {
+        applySingleMove(playback.solution[playback.stepIndex], false);
+        playback.stepIndex++;
+        updatePlaybackUI();
+    }
+}
+
+function stepBackward(forceSquash = false) {
+    if (null === playback.solution || playback.isPlaying || playback.stepIndex <= 0) return;
+    if (squashMovesCheck.checked || forceSquash) {
+        jumpToStep(getPrevSquashedIndex());
+    } else {
+        playback.stepIndex--;
+        applySingleMove(playback.solution[playback.stepIndex], true);
+        updatePlaybackUI();
+    }
+}
 
 playBtn.addEventListener('click', async () => {
     if (null === playback.solution || playback.stepIndex >= playback.solution.length) return;
@@ -747,30 +722,196 @@ restartSeqBtn.addEventListener('click', () => {
     updatePlaybackUI();
 });
 
-function vibrate(duration) {
-    if (false === gameState.isInteracted) {
-        return;
-    }
+/* 7. Solution list rendering ----------------------------------------------------- */
 
-    if (navigator.vibrate) {
-        navigator.vibrate(duration)
-    }
+function setActiveStep(el) {
+    if (playback.lastActiveStepEl === el) return;
+    if (playback.lastActiveStepEl) playback.lastActiveStepEl.classList.remove(UI_CLASSES.ACTIVE_STEP);
+    if (el) el.classList.add(UI_CLASSES.ACTIVE_STEP);
+    playback.lastActiveStepEl = el;
+}
 
-    if (!navigator.getGamepads) return;
-    const gamepads = navigator.getGamepads();
-    for (const gamepad of gamepads) {
-        if (gamepad && gamepad.vibrationActuator && typeof gamepad.vibrationActuator.playEffect === 'function') {
-            gamepad.vibrationActuator.playEffect('dual-rumble', {
-                startDelay: 0,
-                duration: duration * 4,
-                weakMagnitude: 1.0,
-                strongMagnitude: 0.0
-            }).catch(error => {
-            });
-            break;
+function scheduleGlowFadeOut(hole) {
+    if (hole.glowTimeoutId) return;
+    hole.glowTimeoutId = setTimeout(() => {
+        hole.classList.remove(UI_CLASSES.GLOW);
+        hole.glowTimeoutId = null;
+        gameState.glowingHoles = gameState.glowingHoles.filter(h => h !== hole);
+    }, 250);
+}
+
+function updatePlaybackUI() {
+    if (null === playback.solution) return;
+
+    prevBtn.disabled = (0 === playback.stepIndex) || playback.isPlaying;
+    nextBtn.disabled = (playback.stepIndex === playback.solution.length) || playback.isPlaying;
+    playBtn.disabled = (playback.stepIndex === playback.solution.length);
+    restartSeqBtn.disabled = playback.isPlaying;
+    solveBtn.disabled = playback.isPlaying;
+
+    const scrollBehavior = playback.isPlaying ? 'auto' : 'smooth';
+
+    clearPlateStateClasses();
+
+    if (playback.stepIndex < playback.solution.length) {
+        // Highlight the list entry for the upcoming move
+        const activeDomIndex = playback.moveMap[playback.stepIndex];
+        if (undefined !== activeDomIndex && solutionList.children[activeDomIndex]) {
+            const activeEl = solutionList.children[activeDomIndex];
+            setActiveStep(activeEl);
+            if (0 === playback.stepIndex) {
+                solutionList.scrollTop = 0;
+            } else {
+                activeEl.scrollIntoView({behavior: scrollBehavior, block: 'nearest'});
+            }
+        }
+
+        // Highlight the plate about to move and glow its target hole
+        const nextMove = playback.solution[playback.stepIndex];
+        const activeBlock = gameState.blocks[nextMove.plate - 1];
+        const elementsToGlow = [];
+
+        if (activeBlock) {
+            activeBlock.el.classList.add('right' === nextMove.direction ? UI_CLASSES.LINKED : UI_CLASSES.RINKED);
+
+            let moveCount = 0;
+            if (nextMove.count) {
+                moveCount = nextMove.count;
+            } else {
+                for (let i = playback.stepIndex; i < playback.solution.length; i++) {
+                    if (playback.solution[i].plate !== nextMove.plate || playback.solution[i].direction !== nextMove.direction) break;
+                    moveCount++;
+                }
+            }
+
+            const
+                currentHoleOffset = Math.round(activeBlock.x / HOLE_SPACING),
+                currentPinHole = 3 - currentHoleOffset,
+                targetHoleIndex = nextMove.direction === 'right'
+                    ? currentPinHole - moveCount
+                    : currentPinHole + moveCount;
+
+            if (targetHoleIndex >= 0 && targetHoleIndex <= 6) {
+                const holes = activeBlock.el.querySelectorAll(`.${UI_CLASSES.HOLE}`);
+                if (holes[targetHoleIndex]) elementsToGlow.push(holes[targetHoleIndex]);
+            }
+        }
+
+        gameState.glowingHoles.forEach(h => {
+            if (!elementsToGlow.includes(h)) scheduleGlowFadeOut(h);
+        });
+
+        elementsToGlow.forEach(h => {
+            if (h.glowTimeoutId) {
+                clearTimeout(h.glowTimeoutId);
+                h.glowTimeoutId = null;
+            }
+            if (!h.classList.contains(UI_CLASSES.GLOW)) {
+                h.classList.add(UI_CLASSES.GLOW);
+                if (!gameState.glowingHoles.includes(h)) {
+                    gameState.glowingHoles.push(h);
+                }
+            }
+        });
+
+    } else if (0 < playback.solution.length) {
+        // Sequence finished: fade all glows, keep last step highlighted
+        gameState.glowingHoles.forEach(scheduleGlowFadeOut);
+        const lastDomIndex = playback.moveMap[playback.solution.length - 1];
+        if (undefined !== lastDomIndex && solutionList.children[lastDomIndex]) {
+            setActiveStep(solutionList.children[lastDomIndex]);
+            solutionList.children[lastDomIndex].scrollIntoView({behavior: 'smooth', block: 'nearest'});
         }
     }
 }
+
+function renderSolutionList() {
+    if (null === playback.solution) return;
+    playback.lastActiveStepEl = null;
+    playback.moveMap = [];
+    const movesToRender = [];
+
+    if (squashMovesCheck.checked) {
+        let domIndex = 0;
+        playback.solution.forEach((m, i) => {
+            const last = movesToRender[movesToRender.length - 1];
+            if (last && last.plate === m.plate && last.direction === m.direction) {
+                last.count++;
+                last.targetIndex = i + 1;
+                playback.moveMap[i] = domIndex - 1;
+            } else {
+                movesToRender.push({...m, count: 1, targetIndex: i + 1});
+                playback.moveMap[i] = domIndex;
+                domIndex++;
+            }
+        });
+    } else {
+        playback.solution.forEach((m, i) => {
+            movesToRender.push({...m, count: 1, targetIndex: i + 1});
+            playback.moveMap[i] = i;
+        });
+    }
+
+    const fragment = document.createDocumentFragment();
+    movesToRender.forEach((m, index) => {
+        const step = document.createElement('div');
+        const icon = 'left' === m.direction ? '←' : '→';
+        let text = `${index + 1}. Block ${m.plate} ${icon} ${m.direction.toUpperCase()}`;
+        if (1 < m.count) text += ` (x${m.count})`;
+        step.textContent = text;
+        step.style.cursor = 'pointer';
+        step.dataset.target = m.targetIndex;
+        fragment.appendChild(step);
+    });
+    solutionList.replaceChildren(fragment);
+    updatePlaybackUI();
+}
+
+solutionList.addEventListener('click', (e) => {
+    const step = e.target.closest('[data-target]');
+    if (step) jumpToStep(+step.dataset.target);
+});
+
+function toggleExpandList(forceState) {
+    const isExpanded = undefined !== forceState
+        ? forceState
+        : solutionList.classList.toggle(UI_CLASSES.EXPANDED);
+    if (undefined !== forceState) solutionList.classList.toggle(UI_CLASSES.EXPANDED, forceState);
+    stepControlsRow.classList.toggle(UI_CLASSES.EXPANDED_PARENT, isExpanded);
+    expandBtn.textContent = isExpanded ? '▲ Collapse List ▲' : '▼ Expand Full List ▼';
+
+    if (isExpanded) {
+        const
+            rect = solutionList.getBoundingClientRect(),
+            bottomPadding = window.innerHeight * 0.05,
+            availableHeight = window.innerHeight - rect.top - bottomPadding - 45;
+        solutionList.style.height = `${availableHeight}px`;
+        solutionList.style.maxHeight = `${availableHeight}px`;
+    } else {
+        solutionList.style.height = '';
+        solutionList.style.maxHeight = '';
+    }
+
+    // After the 0.3s stretch animation, snap-scroll to the active step
+    setTimeout(() => {
+        solutionList.style.scrollBehavior = 'auto';
+        if (0 === playback.stepIndex) {
+            solutionList.scrollTop = 0;
+        } else if (playback.lastActiveStepEl) {
+            playback.lastActiveStepEl.scrollIntoView({behavior: 'auto', block: 'nearest'});
+        }
+        setTimeout(() => solutionList.style.scrollBehavior = 'smooth', 50);
+    }, 310);
+}
+
+expandBtn.addEventListener('click', () => toggleExpandList());
+
+squashMovesCheck.addEventListener('change', () => {
+    renderSolutionList();
+    if (solutionList.classList.contains(UI_CLASSES.EXPANDED)) toggleExpandList(true);
+});
+
+/* 8. Pin & block state updates ------------------------------------------------------ */
 
 function updateSinglePinMove(b, outTime) {
     updatePinState(b, {
@@ -784,10 +925,7 @@ function updateSinglePinMove(b, outTime) {
 }
 
 function updatePinState(block, options = {}) {
-
-    if (false === gameState.isInteracted && false === gameState.isRender) {
-        return;
-    }
+    if (!gameState.isInteracted && !gameState.isRender) return;
 
     const {
         x = block.x,
@@ -798,13 +936,10 @@ function updatePinState(block, options = {}) {
         pinTransition = null
     } = options;
 
-    if (wrapperTransition !== null) {
-        pinWrapper.style.transition = wrapperTransition;
-    }
-    if (pinTransition !== null) {
-        pin.style.transition = pinTransition;
-    }
+    if (null !== wrapperTransition) pinWrapper.style.transition = wrapperTransition;
+    if (null !== pinTransition) pin.style.transition = pinTransition;
 
+    // The pin stays fixed in world space, so it counter-translates the plate
     pinWrapper.style.transform = `translateX(${-x}px)`;
 
     if (hidePin) {
@@ -820,7 +955,6 @@ function updatePinState(block, options = {}) {
         if ('false' !== pin.dataset.wasOverHole) {
             pin.dataset.wasOverHole = 'false';
         }
-
         const targetTransform = `translateZ(${PIN_UNDER}px)`;
         if (pin.style.transform !== targetTransform) {
             pin.style.transform = targetTransform;
@@ -840,7 +974,7 @@ function updatePinState(block, options = {}) {
 }
 
 function updateBlockState(b, options = {}) {
-    const {x = null, transition = null, pinTransition = null, pinTime = null} = options;
+    const {x = b.x, transition = null, pinTransition = null, pinTime = null} = options;
 
     b.x = x;
     b.el.style.transform = `translateZ(${b.z}px) translateX(${b.x}px)`;
@@ -854,8 +988,10 @@ function updateBlockState(b, options = {}) {
         updateSinglePinMove(b, pinTime);
     }
 
-    scheduleMatchRefresh()
+    scheduleMatchRefresh();
 }
+
+/* 9. Hover preview ---------------------------------------------------------------------- */
 
 function updateHoverPreview(plate) {
     if (gameState.activeLinkerId || playback.solution) return;
@@ -870,7 +1006,7 @@ function updateHoverPreview(plate) {
     gameState.isHovering = true;
 
     const groupIds = Object.keys(hoveredBlock.group);
-    if (groupIds.length <= 1) return;
+    if (1 === groupIds.length) return;
 
     groupIds.forEach(idStr => {
         const id = +idStr;
@@ -899,6 +1035,8 @@ function clearHoverPreview(isEndHovering) {
     gameState.isHovering = false;
 }
 
+/* 10. Plate creation & board rendering ----------------------------------------------------- */
+
 function createPlate(id, prevX, zPos) {
     const
         plateNode = PLATE_TEMPLATE.content.cloneNode(true),
@@ -915,35 +1053,13 @@ function createPlate(id, prevX, zPos) {
     pin.dataset.wasOverHole = 'true';
 
     plate.addEventListener('mouseenter', () => {
-        if (Date.now() - (gameState.lastTouchTime || 0) < 500) return;
+        if (Date.now() - (gameState.lastTouchTime || 0) < 500) return; // ignore synthetic post-touch hover
         updateHoverPreview(plate);
     });
     plate.addEventListener('mouseleave', () => clearHoverPreview(true));
     plate.addEventListener('touchstart', () => clearHoverPreview(true), {passive: true});
 
-    return { plate, pinWrapper, pin };
-}
-
-function loadFromURL() {
-    const
-        params = new URLSearchParams(window.location.search),
-        stateParam = params.get('state');
-
-    if (!stateParam) return false;
-
-    const setup = decodeSetup(stateParam);
-    if (!setup) {
-        console.error('Failed to load shared state.');
-        return false;
-    }
-
-    applySetup(setup);
-
-    const cleanUrl = new URL(window.location.href);
-    cleanUrl.searchParams.delete('state');
-    window.history.replaceState({}, document.title, cleanUrl.toString());
-    solveBtn.click();
-    return true;
+    return {plate, pinWrapper, pin};
 }
 
 function renderBlocks() {
@@ -952,10 +1068,10 @@ function renderBlocks() {
         centerOffset = (count - 1) / 2,
         spacing = gameState.isMobile ? 55 : 50;
 
-    let oldBlocksMap = null;
-    if (gameState.blocks && gameState.blocks.length > 0) {
-        oldBlocksMap = new Map(gameState.blocks.map(b => [b.id, b]));
-    }
+    // Preserve position and (multi-member) groups across re-renders
+    const oldBlocksMap = gameState.blocks.length > 0
+        ? new Map(gameState.blocks.map(b => [b.id, b]))
+        : null;
 
     lock.innerHTML = '';
     gameState.blocks = [];
@@ -971,25 +1087,23 @@ function renderBlocks() {
         let prevX = 0,
             currentGroup = null;
 
-        if (oldBlocksMap) {
-            const oldBlock = oldBlocksMap.get(id);
-            if (oldBlock) {
-                prevX = oldBlock.x;
-                const oldGroup = oldBlock.group;
+        const oldBlock = oldBlocksMap?.get(id);
+        if (oldBlock) {
+            prevX = oldBlock.x;
+            const oldGroup = oldBlock.group;
 
-                if (Object.keys(oldGroup).length > 1) {
-                    currentGroup = {};
-                    for (const key in oldGroup) {
-                        const kid = +key;
-                        if (kid <= count) {
-                            currentGroup[kid] = oldGroup[key];
-                        }
+            if (Object.keys(oldGroup).length > 1) {
+                currentGroup = {};
+                for (const key in oldGroup) {
+                    const kid = +key;
+                    if (kid <= count) {
+                        currentGroup[kid] = oldGroup[key];
                     }
                 }
             }
         }
 
-        const { plate, pinWrapper, pin } = createPlate(id, prevX, zPos);
+        const {plate, pinWrapper, pin} = createPlate(id, prevX, zPos);
         fragment.prepend(plate);
 
         const b = {
@@ -1013,65 +1127,25 @@ function renderBlocks() {
 
 sizeInput.addEventListener('input', (e) => document.documentElement.style.setProperty('--block-scale', e.target.value));
 
-countInput.addEventListener('input', (e) => {
+countInput.addEventListener('input', () => {
     renderBlocks();
     clearSolutionUI();
-    scheduleMatchRefresh()
+    scheduleMatchRefresh();
 });
 
-btnDecrease.addEventListener('click', () => {
-    const currentValue = +countInput.value,
-        min = +countInput.min || 1;
-    if (currentValue > min) {
-        countInput.value = currentValue - 1;
-        countInput.dispatchEvent(new Event('input'));
-    }
-});
-
-btnIncrease.addEventListener('click', () => {
-    const currentValue = +countInput.value,
-        max = +countInput.max || 20;
-    if (currentValue < max) {
-        countInput.value = currentValue + 1;
-        countInput.dispatchEvent(new Event('input'));
-    }
-});
-
-function toggleExpandList(forceState) {
-    const isExpanded = undefined !== forceState ? forceState : solutionList.classList.toggle(UI_CLASSES.EXPANDED);
-    if (undefined !== forceState) solutionList.classList.toggle(UI_CLASSES.EXPANDED, forceState);
-    const parentRow = document.getElementById('stepControlsRow');
-    if (parentRow) parentRow.classList.toggle(UI_CLASSES.EXPANDED_PARENT, isExpanded);
-    expandBtn.textContent = isExpanded ? '▲ Collapse List ▲' : '▼ Expand Full List ▼';
-
-    if (isExpanded) {
-        const rect = solutionList.getBoundingClientRect(),
-            bottomPadding = window.innerHeight * 0.05,
-            availableHeight = window.innerHeight - rect.top - bottomPadding - 45;
-        solutionList.style.height = `${availableHeight}px`;
-        solutionList.style.maxHeight = `${availableHeight}px`;
-    } else {
-        solutionList.style.height = '';
-        solutionList.style.maxHeight = '';
-    }
-
-    setTimeout(() => {
-        solutionList.style.scrollBehavior = 'auto';
-        if (0 === playback.stepIndex) {
-            solutionList.scrollTop = 0;
-        } else if (playback.lastActiveStepEl) {
-            playback.lastActiveStepEl.scrollIntoView({behavior: 'auto', block: 'nearest'});
-        }
-        setTimeout(() => solutionList.style.scrollBehavior = 'smooth', 50);
-    }, 310);
+function stepBlockCount(delta) {
+    const
+        current = +countInput.value,
+        min = +countInput.min || 1,
+        max = +countInput.max || 20,
+        next = current + delta;
+    if (next < min || next > max) return;
+    countInput.value = next;
+    countInput.dispatchEvent(new Event('input'));
 }
 
-expandBtn.addEventListener('click', () => toggleExpandList());
-
-squashMovesCheck.addEventListener('change', () => {
-    renderSolutionList();
-    if (solutionList.classList.contains(UI_CLASSES.EXPANDED)) toggleExpandList(true);
-});
+btnDecrease.addEventListener('click', () => stepBlockCount(-1));
+btnIncrease.addEventListener('click', () => stepBlockCount(+1));
 
 resetBtn.addEventListener('click', () => {
     clearSolutionUI();
@@ -1082,91 +1156,65 @@ resetBtn.addEventListener('click', () => {
     gameState.dragState.isDragging = false;
     clearTimeout(gameState.dragState.longPressTimer);
     renderBlocks();
-    refreshMatches()
+    refreshMatches();
 });
 
-if (!loadFromURL()) {
-    renderBlocks();
-}
+/* 11. Drag / pinch / long-press input -------------------------------------------------------- */
 
-function getClientX(e) {
-    return e.touches && e.touches.length > 0 ? e.touches[0].clientX : e.clientX;
-}
-
+/**
+ * Long press behaviour:
+ *  - no linker active  -> link mode
+ *  - press master again -> deselect
+ *  - press another plate (1, -1)
+ */
 function longPress(clickedId) {
     clearTimeout(gameState.dragState.longPressTimer);
     gameState.dragState.longPressTimer = setTimeout(() => {
-        if (!gameState.dragState.isDragging && gameState.dragState.activePlate) {
-            const curBlock = gameState.blocks[clickedId - 1];
-            if (!curBlock) return;
-            if (null === gameState.activeLinkerId) {
-                gameState.activeLinkerId = curBlock.id;
-                gameState.dragState.activePlate.classList.add(UI_CLASSES.SELECTED);
-                Object.keys(curBlock.group).forEach(idStr => {
-                    const id = +idStr;
-                    if (id !== curBlock.id) {
-                        const b = gameState.blocks[id - 1];
-                        if (b) {
-                            if (1 === curBlock.group[id]) {
-                                b.el.classList.add(UI_CLASSES.LINKED);
-                            } else {
-                                b.el.classList.add(UI_CLASSES.RINKED);
-                            }
-                        }
-                    }
-                });
-                vibrate(15);
-            } else if (gameState.activeLinkerId === curBlock.id) {
-                gameState.activeLinkerId = null;
-                gameState.dragState.activePlate.classList.remove(UI_CLASSES.SELECTED);
-                gameState.lastAction = ACTIONS.DESELECT;
-                updateHoverPreview(gameState.dragState.activePlate);
-                vibrate(15);
-                renderInspectorRow();
-                scheduleMatchRefresh();
-            } else {
-                const masterBlock = gameState.blocks[gameState.activeLinkerId - 1];
-                if (masterBlock.group[curBlock.id]) {
-                    if (1 === masterBlock.group[curBlock.id]) {
-                        masterBlock.group[curBlock.id] = -1;
-                        gameState.dragState.activePlate.classList.remove(UI_CLASSES.LINKED);
-                        gameState.dragState.activePlate.classList.add(UI_CLASSES.RINKED);
-                    } else if (-1 === masterBlock.group[curBlock.id]) {
-                        delete masterBlock.group[curBlock.id];
-                        gameState.dragState.activePlate.classList.remove(UI_CLASSES.RINKED);
-                    }
-                } else {
-                    masterBlock.group[curBlock.id] = 1;
-                    gameState.dragState.activePlate.classList.add(UI_CLASSES.LINKED);
+        if (gameState.dragState.isDragging || !gameState.dragState.activePlate) return;
+
+        const curBlock = gameState.blocks[clickedId - 1];
+        if (!curBlock) return;
+
+        if (null === gameState.activeLinkerId) {
+            gameState.activeLinkerId = curBlock.id;
+            gameState.dragState.activePlate.classList.add(UI_CLASSES.SELECTED);
+            Object.keys(curBlock.group).forEach(idStr => {
+                const id = +idStr;
+                if (id === curBlock.id) return;
+                const b = gameState.blocks[id - 1];
+                if (!b) return;
+                b.el.classList.add(1 === curBlock.group[id] ? UI_CLASSES.LINKED : UI_CLASSES.RINKED);
+            });
+            vibrate(15);
+        } else if (gameState.activeLinkerId === curBlock.id) {
+            gameState.activeLinkerId = null;
+            gameState.dragState.activePlate.classList.remove(UI_CLASSES.SELECTED);
+            gameState.lastAction = ACTIONS.DESELECT;
+            updateHoverPreview(gameState.dragState.activePlate);
+            vibrate(15);
+            renderInspectorRow();
+            scheduleMatchRefresh();
+        } else {
+            const masterBlock = gameState.blocks[gameState.activeLinkerId - 1];
+            if (masterBlock.group[curBlock.id]) {
+                if (1 === masterBlock.group[curBlock.id]) {
+                    masterBlock.group[curBlock.id] = -1;
+                    gameState.dragState.activePlate.classList.remove(UI_CLASSES.LINKED);
+                    gameState.dragState.activePlate.classList.add(UI_CLASSES.RINKED);
+                } else if (-1 === masterBlock.group[curBlock.id]) {
+                    delete masterBlock.group[curBlock.id];
+                    gameState.dragState.activePlate.classList.remove(UI_CLASSES.RINKED);
                 }
-                vibrate(15);
+            } else {
+                masterBlock.group[curBlock.id] = 1;
+                gameState.dragState.activePlate.classList.add(UI_CLASSES.LINKED);
             }
+            vibrate(15);
         }
     }, gameState.activeLinkerId ? SHORT_PRESS_DURATION : LONG_PRESS_DURATION);
 }
 
-function applySingleMove(move, reverse = false) {
-    const
-        primaryBlock = gameState.blocks[move.plate - 1],
-        stepShift = ('left' === move.direction) === reverse ? HOLE_SPACING : -HOLE_SPACING;
-
-    Object.keys(primaryBlock.group).forEach(i => {
-        const
-            id = +i,
-            relativeDir = (primaryBlock.group[id]),
-            b = gameState.blocks[id - 1];
-        if (!b) return;
-        updateBlockState(
-            b,
-            {
-                x: Math.max(-MAX_BOUND, Math.min(MAX_BOUND, b.x + stepShift * relativeDir)),
-                transition: 'transform 0.2s ease-out',
-                pinTime: 200
-            }
-        );
-    });
-}
-
+/** rAF-batched DOM update while dragging a plate group. */
 function updateDragDOM() {
     const
         dragState = gameState.dragState,
@@ -1175,7 +1223,7 @@ function updateDragDOM() {
 
     dragState.rafId = null;
 
-    if (!dragState.activePlate || groupLen === 0) return;
+    if (!dragState.activePlate || 0 === groupLen) return;
 
     const rawDistX = dragState.currentClientX - dragState.startInputX;
 
@@ -1194,19 +1242,21 @@ function updateDragDOM() {
     for (let i = 0; i < groupLen; i++) {
         const item = movingGroup[i];
         item.currentX = item.initialX + (deltaX * item.dir);
-        updateBlockState(item.block, { x: item.currentX });
+        updateBlockState(item.block, {x: item.currentX});
     }
 }
 
 function handleDragStart(e) {
     gameState.isInteracted = true;
 
-    const touches = e.touches,
+    const
+        touches = e.touches,
         dragState = gameState.dragState;
 
     if (touches) gameState.lastTouchTime = Date.now();
 
-    if (touches && touches.length >= 2) {
+    // Two fingers -> pinch zoom
+    if (touches && 2 <= touches.length) {
         document.body.classList.add(UI_CLASSES.ZOOMING);
 
         const t0 = touches[0], t1 = touches[1];
@@ -1216,9 +1266,8 @@ function handleDragStart(e) {
         clearTimeout(dragState.longPressTimer);
 
         if (dragState.activePlate) {
-            const movingGroup = dragState.movingGroup;
-            for (let i = 0, len = movingGroup.length; i < len; i++) {
-                updateBlockState(movingGroup[i].block, { x: movingGroup[i].initialX });
+            for (const item of dragState.movingGroup) {
+                updateBlockState(item.block, {x: item.initialX});
             }
             dragState.activePlate = null;
             dragState.movingGroup.length = 0;
@@ -1245,10 +1294,10 @@ function handleDragStart(e) {
 
     updateHoverPreview(clickedPlate);
 
-    const clickedId = +clickedPlate.dataset.id;
-    const blocks = gameState.blocks;
-
-    const clickedBlock = blocks[clickedId - 1];
+    const
+        clickedId = +clickedPlate.dataset.id,
+        blocks = gameState.blocks,
+        clickedBlock = blocks[clickedId - 1];
     if (!clickedBlock) return;
 
     let minD = -Infinity, maxD = Infinity;
@@ -1260,19 +1309,19 @@ function handleDragStart(e) {
             b = blocks[id - 1],
             dirVal = group[idStr];
 
-        if (b) {
-            dragState.movingGroup.push({ block: b, dir: dirVal, initialX: b.x, currentX: b.x });
-            b.el.style.transition = 'none';
-            b.pinWrapper.style.transition = 'none';
+        if (!b) continue;
 
-            const
-                dir = dirVal === 1,
-                minBound = dir ? -MAX_DELTA_LIMIT - b.x : b.x - MAX_DELTA_LIMIT,
-                maxBound = dir ? MAX_DELTA_LIMIT - b.x : b.x + MAX_DELTA_LIMIT;
+        dragState.movingGroup.push({block: b, dir: dirVal, initialX: b.x, currentX: b.x});
+        b.el.style.transition = 'none';
+        b.pinWrapper.style.transition = 'none';
 
-            if (minBound > minD) minD = minBound;
-            if (maxBound < maxD) maxD = maxBound;
-        }
+        const
+            dir = 1 === dirVal,
+            minBound = dir ? -MAX_DELTA_LIMIT - b.x : b.x - MAX_DELTA_LIMIT,
+            maxBound = dir ? MAX_DELTA_LIMIT - b.x : b.x + MAX_DELTA_LIMIT;
+
+        if (minBound > minD) minD = minBound;
+        if (maxBound < maxD) maxD = maxBound;
     }
 
     dragState.minDeltaX = minD;
@@ -1283,14 +1332,13 @@ function handleDragStart(e) {
 }
 
 function handleDragMove(e) {
+    //pinch
     if (e.touches && 2 === e.touches.length) {
         e.preventDefault();
         const t1 = e.touches[0], t2 = e.touches[1];
 
         if (!pinchState.initialDistance) {
-            const dx = t1.clientX - t2.clientX;
-            const dy = t1.clientY - t2.clientY;
-            pinchState.initialDistance = Math.hypot(dx, dy);
+            pinchState.initialDistance = Math.hypot(t1.clientX - t2.clientX, t1.clientY - t2.clientY);
             pinchState.initialScale = pinchState.lastScale;
         }
 
@@ -1318,11 +1366,11 @@ function handleDragMove(e) {
 }
 
 function handleDragEnd(e) {
-    const { dragState } = gameState;
-    const { activePlate, movingGroup, isDragging } = dragState;
+    const {dragState} = gameState;
+    const {activePlate, movingGroup, isDragging} = dragState;
 
     if (e?.changedTouches) gameState.lastTouchTime = Date.now();
-    if ((e?.touches?.length ?? 0) < 2) document.body.classList.remove('is-zooming');
+    if (2 > (e?.touches?.length ?? 0)) document.body.classList.remove(UI_CLASSES.ZOOMING);
 
     pinchState.initialDistance = 0;
     clearTimeout(dragState.longPressTimer);
@@ -1338,23 +1386,23 @@ function handleDragEnd(e) {
         const clickedId = +activePlate.dataset.id;
 
         let primary = movingGroup[0];
-        for (let i = 0; i < movingGroup.length; i++) {
-            if (movingGroup[i].block.id === clickedId) {
-                primary = movingGroup[i];
+        for (const item of movingGroup) {
+            if (item.block.id === clickedId) {
+                primary = item;
                 break;
             }
         }
 
-        const currentX = primary.currentX ?? primary.initialX;
-        const holeIndex = Math.round(currentX / HOLE_SPACING);
+        const
+            currentX = primary.currentX ?? primary.initialX,
+            holeIndex = Math.round(currentX / HOLE_SPACING);
 
         let snapDelta = (holeIndex * HOLE_SPACING) - currentX,
             maxAllowedShiftLeft = -Infinity,
             maxAllowedShiftRight = Infinity;
 
-        for (let i = 0; i < movingGroup.length; i++) {
+        for (const item of movingGroup) {
             const
-                item = movingGroup[i],
                 cx = item.currentX ?? item.initialX,
                 cxDir = cx * item.dir;
             maxAllowedShiftLeft = Math.max(maxAllowedShiftLeft, -MAX_DELTA_LIMIT - cxDir);
@@ -1363,8 +1411,7 @@ function handleDragEnd(e) {
 
         snapDelta = Math.max(maxAllowedShiftLeft, Math.min(snapDelta, maxAllowedShiftRight));
 
-        for (let i = 0; i < movingGroup.length; i++) {
-            const item = movingGroup[i];
+        for (const item of movingGroup) {
             const cx = item.currentX ?? item.initialX;
             updateBlockState(item.block, {x: cx + (snapDelta * item.dir), transition: 'transform 0.2s ease-out'});
         }
@@ -1379,7 +1426,8 @@ function handleDragEnd(e) {
         gameState.lastAction = ACTIONS.DRAG_END;
     }
 
-    if (e?.type === 'mouseup') {
+    // Re-apply hover if the mouse is released over a plate
+    if ('mouseup' === e?.type) {
         const timeSinceTouch = Date.now() - (gameState.lastTouchTime || 0);
         if (timeSinceTouch >= 500 && ACTIONS.DESELECT_DRAG_END !== gameState.lastAction) {
             const plateUnderCursor = document.elementFromPoint(e.clientX, e.clientY)?.closest(`.${UI_CLASSES.PLATE}`);
@@ -1388,66 +1436,12 @@ function handleDragEnd(e) {
     }
 }
 
-function getNextSquashedIndex() {
-    if (null === playback.solution || playback.stepIndex >= playback.solution.length) return playback.stepIndex;
-    const currentMove = playback.solution[playback.stepIndex];
-    let nextIdx = playback.stepIndex + 1;
-    while (nextIdx < playback.solution.length) {
-        const move = playback.solution[nextIdx];
-        if (move.plate === currentMove.plate && move.direction === currentMove.direction) {
-            nextIdx++;
-        } else {
-            break;
-        }
-    }
-    return nextIdx + 1;
-}
-
-function getPrevSquashedIndex() {
-    if (null === playback.solution || playback.stepIndex <= 0) return playback.stepIndex;
-    const currentMove = playback.solution[playback.stepIndex - 1];
-    let prevIdx = playback.stepIndex - 1;
-    while (prevIdx > 0) {
-        const move = playback.solution[prevIdx - 1];
-        if (move.plate === currentMove.plate && move.direction === currentMove.direction) {
-            prevIdx--;
-        } else {
-            break;
-        }
-    }
-    return prevIdx + 1;
-}
-
-function stepForward(forceSquash = false) {
-    if (null === playback.solution || playback.isPlaying || playback.stepIndex >= playback.solution.length) return;
-    if (squashMovesCheck.checked || forceSquash) {
-        const targetIdx = getNextSquashedIndex();
-        jumpToStep(targetIdx);
-    } else {
-        applySingleMove(playback.solution[playback.stepIndex], false);
-        playback.stepIndex++;
-        updatePlaybackUI();
-    }
-}
-
-function stepBackward(forceSquash = false) {
-    if (null === playback.solution || playback.isPlaying || playback.stepIndex <= 0) return;
-    if (squashMovesCheck.checked || forceSquash) {
-        const targetIdx = getPrevSquashedIndex();
-        jumpToStep(targetIdx);
-    } else {
-        playback.stepIndex--;
-        applySingleMove(playback.solution[playback.stepIndex], true);
-        updatePlaybackUI();
-    }
-}
-
 function setupLongPress(button, stepFunction) {
     let pressTimer;
     let animTimer;
     let isLongPressExecuted = false;
 
-    const startPress = (e) => {
+    const startPress = () => {
         if (button.disabled) return;
         if (!gameState.isMobile) return;
         if (null === playback.solution || playback.isPlaying) return;
@@ -1481,6 +1475,17 @@ function setupLongPress(button, stepFunction) {
         }
         stepFunction(false);
     });
+}
+
+/* 12. INSPECTOR ROW (mobile) -------------------------------------------------------------------- */
+
+let currentHoveredBtn = null;
+
+function resetInspectorHover() {
+    if (!currentHoveredBtn) return;
+    clearHoverPreview(true);
+    currentHoveredBtn.style.background = currentHoveredBtn.dataset.defaultBg || '';
+    currentHoveredBtn = null;
 }
 
 function renderInspectorRow() {
@@ -1519,43 +1524,36 @@ function renderInspectorRow() {
     inspectorRow.replaceChildren(fragment);
 }
 
-let currentHoveredBtn = null;
+// Slide a finger across the row to preview each plate's group
 inspectorRow.addEventListener('touchmove', (e) => {
     e.preventDefault();
     const touch = e.touches[0];
     const target = document.elementFromPoint(touch.clientX, touch.clientY);
-    if (target && target.classList.contains(UI_CLASSES.INSPECT_BTN) && !target.classList.contains(UI_CLASSES.DISABLED_BTN)) {
-        if (currentHoveredBtn !== target) {
-            if (currentHoveredBtn) {
-                clearHoverPreview(true);
-                currentHoveredBtn.style.background = currentHoveredBtn.dataset.defaultBg || '';
-            }
-            currentHoveredBtn = target;
-            updateHoverPreview(target.blockEl);
-            target.style.background = '#555';
-        }
-    } else {
-        if (currentHoveredBtn) {
-            clearHoverPreview(true);
-            currentHoveredBtn.style.background = currentHoveredBtn.dataset.defaultBg || '';
-            currentHoveredBtn = null;
-        }
+    const isActiveBtn = target
+        && target.classList.contains(UI_CLASSES.INSPECT_BTN)
+        && !target.classList.contains(UI_CLASSES.DISABLED_BTN);
+
+    if (!isActiveBtn) {
+        resetInspectorHover();
+        return;
+    }
+
+    if (currentHoveredBtn !== target) {
+        resetInspectorHover();
+        currentHoveredBtn = target;
+        updateHoverPreview(target.blockEl);
+        target.style.background = '#555';
     }
 }, {passive: false});
 
-const releaseSlidingTouch = () => {
-    if (currentHoveredBtn) {
-        clearHoverPreview(true);
-        currentHoveredBtn.style.background = currentHoveredBtn.dataset.defaultBg || '';
-        currentHoveredBtn = null;
-    }
-};
+inspectorRow.addEventListener('touchend', resetInspectorHover);
+inspectorRow.addEventListener('touchcancel', resetInspectorHover);
 
-inspectorRow.addEventListener('touchend', releaseSlidingTouch);
-inspectorRow.addEventListener('touchcancel', releaseSlidingTouch);
+/* 13. Bootstrapping -------------------------------------------------------------------------------- */
 
 setupLongPress(nextBtn, stepForward);
 setupLongPress(prevBtn, stepBackward);
+
 document.addEventListener('mousedown', handleDragStart);
 document.addEventListener('mousemove', handleDragMove);
 window.addEventListener('mouseup', handleDragEnd);
@@ -1564,25 +1562,6 @@ document.addEventListener('touchmove', handleDragMove, {passive: false});
 window.addEventListener('touchend', handleDragEnd);
 document.addEventListener('touchcancel', handleDragEnd);
 
-let shareStatusTimeout;
-
-shareBtn.addEventListener('click', () => {
-    const
-        value = playback.initialSetup || compactSetup(),
-        encoded = btoa(JSON.stringify(value)),
-        url = new URL(window.location.href);
-
-    url.searchParams.set('state', encoded);
-
-    navigator.clipboard.writeText(url.toString()).then(() => {
-        setStatus('Share link copied to clipboard!', 'success');
-        clearTimeout(shareStatusTimeout);
-        shareStatusTimeout = setTimeout(() => {
-            if ('Share link copied to clipboard!' === statusMsg.textContent) {
-                setStatus('', 'info');
-            }
-        }, 1500);
-    }).catch(err => {
-        setStatus('Failed to copy link.', 'error');
-    });
-});
+if (!loadFromURL()) {
+    renderBlocks();
+}
