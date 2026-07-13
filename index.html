@@ -1263,7 +1263,7 @@
                 left: 50%;
             }
         }
-</style>
+    </style>
 </head>
 <body>
 <div class="controls" id="controls">
@@ -1412,9 +1412,15 @@
         </svg>
     </button>
 </footer>
-<script src="db.js"></script>
-<script src="solver.js"></script>
-<script src="index.js"></script>
-<script src="tutorial.js"></script>
-</body>
+<script>
+    (function () {
+        const t = Date.now();
+        ['db.js', 'solver.js', 'index.js', 'tutorial.js'].forEach(function (src) {
+            var s = document.createElement('script');
+            s.src = src + '?t=' + t;
+            s.async = false;
+            document.body.appendChild(s);
+        });
+    })();
+</script></body>
 </html>
