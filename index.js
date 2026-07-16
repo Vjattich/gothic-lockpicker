@@ -469,10 +469,11 @@ shareBtn.addEventListener('click', () => {
     url.searchParams.set('state', btoa(JSON.stringify(value)));
 
     navigator.clipboard.writeText(url.toString()).then(() => {
-        setStatus('Share link copied to clipboard!', 'success');
+        const message = 'Copied to clipboard!';
+        setStatus(message, 'success');
         clearTimeout(shareStatusTimeout);
         shareStatusTimeout = setTimeout(() => {
-            if ('Share link copied to clipboard!' === statusMsg.textContent) {
+            if (message === statusMsg.textContent) {
                 setStatus('', 'info');
             }
         }, 1500);
@@ -563,15 +564,15 @@ solveBtn.addEventListener('click', async () => {
     try {
         const result = await solveInWorker();
         if (result.timeout) {
-            setStatus('Solver timed out! Try adjusting parameters.', 'error');
+            setStatus('Solver timed out!', 'error');
         } else if (!result || !result.moves) {
-            setStatus('No solution found from this state.', 'error');
+            setStatus('No solution found', 'error');
         } else if (result.moves.length === 0) {
             setStatus('', 'info');
         } else {
             playback.solution = result.moves;
             playback.stepIndex = 0;
-            setStatus(`Solution found: ${result.moves.length} moves!`, 'success');
+            setStatus(`${result.moves.length} moves!`, 'success');
             playBtn.style.display = 'block';
             restartSeqBtn.style.display = 'block';
             stepControlsRow.classList.add(UI_CLASSES.SHOW_STRETCH);
@@ -719,7 +720,7 @@ restartSeqBtn.addEventListener('click', () => {
         playback.stepIndex--;
     }
     playBtn.textContent = '▶ Play';
-    setStatus(`Solution found: ${playback.solution.length} moves!`, 'success');
+    setStatus(`${playback.solution.length} moves!`, 'success');
     updatePlaybackUI();
 });
 
