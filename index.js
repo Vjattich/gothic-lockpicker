@@ -60,6 +60,8 @@ const
     PIN_MIDDLE = -5,
     PIN_UNDER = 1,
     LONG_PRESS_DURATION = 500,
+    HOLD_STEP_DURATION = 600,
+    PRESS_ANIM_DELAY = 150,
     SHORT_PRESS_DURATION = 100,
     DRAG_THRESHOLD = 5,
     HOLE_SPACING = 36.5,
@@ -1450,14 +1452,14 @@ function setupLongPress(button, stepFunction) {
 
         isLongPressExecuted = false;
 
-        animTimer = setTimeout(() => button.classList.add(UI_CLASSES.PRESSING), 150);
+        animTimer = setTimeout(() => button.classList.add(UI_CLASSES.PRESSING), PRESS_ANIM_DELAY);
 
         pressTimer = setTimeout(() => {
             button.classList.remove(UI_CLASSES.PRESSING);
             isLongPressExecuted = true;
             stepFunction(true);
             if (navigator.vibrate) navigator.vibrate(50);
-        }, 600);
+        }, HOLD_STEP_DURATION);
     };
 
     const clearPress = () => {
@@ -1479,7 +1481,7 @@ function setupLongPress(button, stepFunction) {
     });
 }
 
-/* 12. INSPECTOR ROW (mobile) -------------------------------------------------------------------- */
+/* 12. INSPECTOR ROW -------------------------------------------------------------------- */
 
 let currentHoveredBtn = null;
 
@@ -1490,14 +1492,23 @@ function resetInspectorHover() {
     currentHoveredBtn = null;
 }
 
+function setInspectorHover(btn) {
+    if (currentHoveredBtn === btn) return;
+    resetInspectorHover();
+    currentHoveredBtn = btn;
+    updateHoverPreview(btn.blockEl);
+    btn.style.background = '#555';
+}
+
 function renderInspectorRow() {
-    if (!inspectorRow || !gameState.isMobile) return;
+    if (!inspectorRow) return;
     const GROUP_COLOR = '#66d437';
     const fragment = document.createDocumentFragment();
     for (let i = 0; i < MAX_PLATES; i++) {
         const btn = document.createElement('button');
         btn.className = UI_CLASSES.INSPECT_BTN;
         btn.textContent = i + 1;
+        btn.tabIndex = -1;
         if (i < gameState.blocks.length) {
             const block = gameState.blocks[i];
             let defaultBg = '';
@@ -1510,13 +1521,13 @@ function renderInspectorRow() {
             btn.dataset.defaultBg = defaultBg;
             btn.addEventListener('touchstart', (e) => {
                 e.preventDefault();
-                if (currentHoveredBtn && currentHoveredBtn !== btn) {
-                    currentHoveredBtn.style.background = currentHoveredBtn.dataset.defaultBg || '';
-                }
-                currentHoveredBtn = btn;
-                updateHoverPreview(block.el);
-                btn.style.background = '#555';
+                setInspectorHover(btn);
             }, {passive: false});
+            btn.addEventListener('mouseenter', () => {
+                if (Date.now() - (gameState.lastTouchTime || 0) < 500) return;
+                setInspectorHover(btn);
+            });
+            btn.addEventListener('mouseleave', resetInspectorHover);
         } else {
             btn.classList.add(UI_CLASSES.DISABLED_BTN);
             btn.addEventListener('touchstart', (e) => e.preventDefault(), {passive: false});
@@ -1535,23 +1546,66 @@ inspectorRow.addEventListener('touchmove', (e) => {
         && target.classList.contains(UI_CLASSES.INSPECT_BTN)
         && !target.classList.contains(UI_CLASSES.DISABLED_BTN);
 
-    if (!isActiveBtn) {
-        resetInspectorHover();
-        return;
-    }
-
-    if (currentHoveredBtn !== target) {
-        resetInspectorHover();
-        currentHoveredBtn = target;
-        updateHoverPreview(target.blockEl);
-        target.style.background = '#555';
-    }
+    if (isActiveBtn) setInspectorHover(target);
+    else resetInspectorHover();
 }, {passive: false});
 
 inspectorRow.addEventListener('touchend', resetInspectorHover);
 inspectorRow.addEventListener('touchcancel', resetInspectorHover);
 
-/* 13. Bootstrapping -------------------------------------------------------------------------------- */
+/* 13. Keyboard hotkeys (desktop) -------------------------------------------------------------- */
+
+let spaceHeld = false,
+    spaceStepped = false,
+    spaceAnimTimer = null,
+    spaceHoldTimer = null;
+
+function isTypingTarget() {
+    const el = document.activeElement;
+    return !!el && ('INPUT' === el.tagName || 'TEXTAREA' === el.tagName || el.isContentEditable);
+}
+
+function endSpaceHold() {
+    clearTimeout(spaceAnimTimer);
+    clearTimeout(spaceHoldTimer);
+    nextBtn.classList.remove(UI_CLASSES.PRESSING);
+    spaceHeld = false;
+}
+
+document.addEventListener('keydown', (e) => {
+    if (gameState.isMobile || e.defaultPrevented || isTypingTarget()) return;
+
+    if ('Enter' === e.key) {
+        e.preventDefault();
+        if (!solveBtn.disabled) solveBtn.click();
+        return;
+    }
+
+    if ('Space' !== e.code && ' ' !== e.key) return;
+    e.preventDefault();
+    if (e.repeat || spaceHeld) return;
+    if (nextBtn.disabled || null === playback.solution || playback.isPlaying) return;
+
+    spaceHeld = true;
+    spaceStepped = false;
+    spaceAnimTimer = setTimeout(() => nextBtn.classList.add(UI_CLASSES.PRESSING), PRESS_ANIM_DELAY);
+    spaceHoldTimer = setTimeout(() => {
+        nextBtn.classList.remove(UI_CLASSES.PRESSING);
+        spaceStepped = true;
+        stepForward(true);
+    }, HOLD_STEP_DURATION);
+});
+
+document.addEventListener('keyup', (e) => {
+    if ('Space' !== e.code && ' ' !== e.key) return;
+    if (!spaceHeld) return;
+    endSpaceHold();
+    if (!spaceStepped) stepForward(false);
+});
+
+window.addEventListener('blur', endSpaceHold);
+
+/* 14. Bootstrapping -------------------------------------------------------------------------------- */
 
 setupLongPress(nextBtn, stepForward);
 setupLongPress(prevBtn, stepBackward);
