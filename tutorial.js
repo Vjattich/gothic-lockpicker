@@ -5,8 +5,7 @@ const
     tutorialText = document.getElementById('tutorialText'),
     tutorialArrow = document.getElementById('tutorialArrow'),
     tutorialArrow2 = document.getElementById('tutorialArrow2'),
-    tutorialKeyNext = document.getElementById('tutorialKeyNext'),
-    tutorialKeyPrev = document.getElementById('tutorialKeyPrev'),
+    tutorialKey = document.getElementById('tutorialKey'),
     questionMarkBtn = document.querySelector('.question-mark'),
     iconQm = document.getElementById('icon-qm'),
     iconX = document.getElementById('icon-x'),
@@ -39,6 +38,13 @@ function stepSleep(ms) {
     });
 }
 
+const HOTKEYS = {
+    next: {btn: nextBtn, labels: ['SPACE'], code: 'Space', key: ' ', ctrl: false},
+    prev: {btn: prevBtn, labels: ['CTRL', 'SPACE'], code: 'Space', key: ' ', ctrl: true},
+    restart: {btn: restartSeqBtn, labels: ['BACKSPACE'], code: 'Backspace', key: 'Backspace', ctrl: false},
+    reset: {btn: resetBtn, labels: ['CTRL', 'BACKSPACE'], code: 'Backspace', key: 'Backspace', ctrl: true}
+};
+
 function positionArrowRelative(target, offsetX = 0, offsetY = 0, arrowElement = tutorialArrow) {
     if (!target) return;
     const rect = target.getBoundingClientRect();
@@ -52,36 +58,51 @@ function hideArrows() {
     tutorialArrow2.style.display = 'none';
 }
 
-function showStepKey(btn) {
-    if (document.activeElement) document.activeElement.blur();
-    const key = prevBtn === btn ? tutorialKeyPrev : tutorialKeyNext;
-    const rect = btn.getBoundingClientRect();
-    key.style.display = 'block';
-    key.style.top = `${rect.bottom + 14}px`;
-    key.style.left = `${Math.max(key.offsetWidth / 2 + 10, rect.left + rect.width / 2)}px`;
-}
-
-function hideStepKeys() {
-    [tutorialKeyNext, tutorialKeyPrev].forEach(key => {
-        key.style.display = 'none';
-        key.classList.remove('is-pressed');
+function renderHotkeyCaps(labels) {
+    let x = 3, bases = '', caps = '', plus = '';
+    labels.forEach((label, i) => {
+        const w = label.length * 13 + 26;
+        if (i) plus += `<text class="key-plus" x="${x - 8}" y="22">+</text>`;
+        bases += `<rect class="key-base" x="${x}" y="11" width="${w}" height="38" rx="8"/>`;
+        caps += `<rect x="${x}" y="3" width="${w}" height="38" rx="8"/><text x="${x + w / 2}" y="22">${label}</text>`;
+        x += w + 16;
     });
+    const width = x - 13;
+    tutorialKey.innerHTML = `<svg height="52" viewBox="0 0 ${width} 52" width="${width}">${bases}${plus}<g class="key-cap">${caps}</g></svg>`;
 }
 
-function dispatchSpace(type, ctrl) {
-    document.dispatchEvent(new KeyboardEvent(type, {code: 'Space', key: ' ', ctrlKey: ctrl, bubbles: true, cancelable: true}));
+function showHotkey(hotkey) {
+    if (document.activeElement) document.activeElement.blur();
+    renderHotkeyCaps(hotkey.labels);
+    const rect = hotkey.btn.getBoundingClientRect();
+    tutorialKey.style.display = 'block';
+    tutorialKey.style.top = `${rect.bottom + 14}px`;
+    tutorialKey.style.left = `${Math.max(tutorialKey.offsetWidth / 2 + 10, rect.left + rect.width / 2)}px`;
 }
 
-async function pressStepKey(btn, holdMs) {
-    const back = prevBtn === btn;
-    const key = back ? tutorialKeyPrev : tutorialKeyNext;
-    key.classList.add('is-pressed');
-    pressButtonVisual(btn);
-    dispatchSpace('keydown', back);
+function hideHotkey() {
+    tutorialKey.style.display = 'none';
+    tutorialKey.classList.remove('is-pressed');
+}
+
+function dispatchHotkey(type, hotkey) {
+    document.dispatchEvent(new KeyboardEvent(type, {
+        code: hotkey.code,
+        key: hotkey.key,
+        ctrlKey: hotkey.ctrl,
+        bubbles: true,
+        cancelable: true
+    }));
+}
+
+async function pressHotkey(hotkey, holdMs) {
+    tutorialKey.classList.add('is-pressed');
+    pressButtonVisual(hotkey.btn);
+    dispatchHotkey('keydown', hotkey);
     await stepSleep(holdMs);
-    dispatchSpace('keyup', back);
-    releaseButtonVisual(btn);
-    key.classList.remove('is-pressed');
+    dispatchHotkey('keyup', hotkey);
+    releaseButtonVisual(hotkey.btn);
+    tutorialKey.classList.remove('is-pressed');
 }
 
 function dispatchAll(el, ...types) {
@@ -178,7 +199,7 @@ function endTutorial() {
 
 function clean() {
     hideArrows();
-    hideStepKeys();
+    hideHotkey();
     endSpaceHold();
 
     tutorialSearchDemo = false;
@@ -206,7 +227,7 @@ function clean() {
         });
     }
 
-    [nextBtn, prevBtn].forEach(btn => {
+    [nextBtn, prevBtn, restartSeqBtn, resetBtn].forEach(btn => {
         if (btn) releaseButtonVisual(btn);
     });
 
@@ -219,6 +240,7 @@ function clean() {
 /**
  * The order of tutorial steps. tutorialStep is a 1-based index into this array,
  * so inserting a new step is just inserting its name here — no renumbering.
+ * resetHotkeys is keyboard-only, so it drops out of the order on mobile.
  */
 const TUTORIAL_ORDER = [
     'zoom',
@@ -227,6 +249,7 @@ const TUTORIAL_ORDER = [
     'groupPlates',
     'inspectGroups',
     'stepControls',
+    'resetHotkeys',
     'searchCount',
     'searchPick',
     'autoPlay',
@@ -234,7 +257,8 @@ const TUTORIAL_ORDER = [
 ];
 
 function currentStepName() {
-    return TUTORIAL_ORDER[tutorialStep - 1];
+    const order = TUTORIAL_ORDER.filter(name => !gameState.isMobile || 'resetHotkeys' !== name);
+    return order[tutorialStep - 1];
 }
 
 const TUTORIAL_STEPS = {
@@ -449,17 +473,16 @@ const TUTORIAL_STEPS = {
         while (solveBtn.disabled && !cancelled()) await stepSleep(200);
         if (cancelled()) return;
 
-        const demoStepKey = async (btn) => {
-            hideStepKeys();
-            positionArrowRelative(btn, 15, -40);
-            showStepKey(btn);
+        const demoStepKey = async (hotkey) => {
+            positionArrowRelative(hotkey.btn, 15, -40);
+            showHotkey(hotkey);
             await stepSleep(600);
             for (let i = 0; i < 3 && !cancelled(); i++) {
-                await pressStepKey(btn, 140);
+                await pressHotkey(hotkey, 140);
                 await stepSleep(700);
             }
             if (cancelled()) return;
-            await pressStepKey(btn, HOLD_STEP_DURATION + 250);
+            await pressHotkey(hotkey, HOLD_STEP_DURATION + 250);
             await stepSleep(900);
         };
 
@@ -487,10 +510,54 @@ const TUTORIAL_STEPS = {
                 await stepSleep(800);
             } else {
                 jumpToStep(1);
-                await demoStepKey(nextBtn);
+                await demoStepKey(HOTKEYS.next);
                 if (cancelled()) break;
-                await demoStepKey(prevBtn);
+                await demoStepKey(HOTKEYS.prev);
             }
+        }
+    },
+
+    async resetHotkeys(cancelled) {
+        clean();
+        tutorialText.textContent = 'BACKSPACE rewinds a solved sequence back to its first step. CTRL+BACKSPACE clears the lock itself, so you can set up a new one.';
+
+        const messy = [HOLE_SPACING, -HOLE_SPACING * 2, HOLE_SPACING * 2, -HOLE_SPACING, HOLE_SPACING * 3, -HOLE_SPACING];
+
+        while (!cancelled()) {
+            gameState.blocks.forEach((b, i) => {
+                updateBlockState(b, {x: messy[i] || 0, transition: 'transform 0.5s ease', pinTime: 400});
+            });
+            await stepSleep(700);
+            if (cancelled()) break;
+
+            solveBtn.click();
+            while (solveBtn.disabled && !cancelled()) await stepSleep(200);
+            if (cancelled()) break;
+
+            for (let i = 0; i < 4 && !cancelled(); i++) {
+                nextBtn.click();
+                await stepSleep(450);
+            }
+            if (cancelled()) break;
+
+            positionArrowRelative(restartSeqBtn, 10, -40);
+            showHotkey(HOTKEYS.restart);
+            await stepSleep(900);
+            if (cancelled()) break;
+
+            await pressHotkey(HOTKEYS.restart, 160);
+            await stepSleep(1600);
+            if (cancelled()) break;
+
+            positionArrowRelative(resetBtn, 15, -40);
+            showHotkey(HOTKEYS.reset);
+            await stepSleep(900);
+            if (cancelled()) break;
+
+            await pressHotkey(HOTKEYS.reset, 160);
+            hideArrows();
+            hideHotkey();
+            await stepSleep(1600);
         }
     },
 

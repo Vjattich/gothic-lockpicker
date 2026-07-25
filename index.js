@@ -1582,6 +1582,13 @@ document.addEventListener('keydown', (e) => {
         return;
     }
 
+    if ('Backspace' === e.key) {
+        e.preventDefault();
+        const btn = e.ctrlKey ? resetBtn : restartSeqBtn;
+        if (!btn.disabled) btn.click();
+        return;
+    }
+
     if ('Space' !== e.code && ' ' !== e.key) return;
     e.preventDefault();
     if (e.repeat || spaceHeld) return;
