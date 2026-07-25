@@ -144,8 +144,9 @@
             box-sizing: border-box;
         }
 
-        #countInput {
-            font-size: 17px;
+        #countInput,
+        #blockCountContainer .label-text {
+            display: none;
         }
 
         .controls button {
@@ -198,6 +199,7 @@
             color: #fff;
             border: 1px solid var(--border) !important;
             border-radius: 4px;
+            flex: 0 0 32px;
             width: 32px;
             height: 30px;
             font-size: 18px;
@@ -886,12 +888,13 @@
             }
         }
 
-        /* 8. Inspector row (mobile plate picker) ---------------------------------- */
+        /* 8. Inspector row (plate picker) ----------------------------------------- */
 
         .inspector-row {
-            display: none;
+            display: flex;
             flex-direction: row;
             justify-content: space-between;
+            align-items: center;
             flex: 1 1 auto;
             min-width: 0;
         }
@@ -899,7 +902,7 @@
         .inspect-btn {
             flex: 1 1 0;
             min-width: 0;
-            height: 35px;
+            height: 30px;
             background: var(--surface-2);
             color: #fff;
             border: 1px solid var(--border);
@@ -1048,8 +1051,6 @@
             #squashLabel,
             #scaleLabel,
             #expandBtn,
-            #blockCountContainer .label-text,
-            #countInput,
             .search-label {
                 display: none !important;
             }
@@ -1090,8 +1091,7 @@
             }
 
             .controls button,
-            .controls label:not(.toggle-label),
-            #countInput {
+            .controls label:not(.toggle-label) {
                 font-size: 14px;
             }
 
@@ -1204,14 +1204,10 @@
             }
 
             .inspector-row {
-                display: flex;
-                align-items: center;
                 gap: 1px;
-                width: auto;
             }
 
             .inspect-btn {
-                height: 30px;
                 font-size: 11px;
                 margin: 0;
                 padding: 0 2px;
