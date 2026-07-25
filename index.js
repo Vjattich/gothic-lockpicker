@@ -471,12 +471,17 @@ shareBtn.addEventListener('click', () => {
     url.searchParams.set('state', btoa(JSON.stringify(value)));
 
     navigator.clipboard.writeText(url.toString()).then(() => {
-        const message = 'Copied to clipboard!';
+
+        const message = 'Copied to clipboard!',
+              idx =statusMsg.className.lastIndexOf('-') + 1,
+              prevMessage = statusMsg.textContent,
+              prevMessageType =  statusMsg.className.substring(idx, statusMsg.className.length)
+
         setStatus(message, 'success');
         clearTimeout(shareStatusTimeout);
         shareStatusTimeout = setTimeout(() => {
             if (message === statusMsg.textContent) {
-                setStatus('', 'info');
+                setStatus(prevMessage, prevMessageType);
             }
         }, 1500);
     }).catch(() => {
