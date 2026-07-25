@@ -976,6 +976,54 @@
             50%      { transform: translateY(-15px); }
         }
 
+        .tutorial-key {
+            position: absolute;
+            display: none;
+            z-index: 1000;
+            pointer-events: none;
+            transform: translateX(-50%);
+        }
+
+        .tutorial-key .key-base {
+            fill: var(--dark);
+            stroke: var(--border);
+        }
+
+        .tutorial-key .key-cap {
+            transition: transform 0.08s ease;
+        }
+
+        .tutorial-key .key-cap rect {
+            fill: var(--surface-2);
+            stroke: var(--plate-border);
+        }
+
+        .tutorial-key text {
+            fill: #fff;
+            font: bold 16px monospace;
+            letter-spacing: 3px;
+            text-anchor: middle;
+            dominant-baseline: middle;
+        }
+
+        .tutorial-key.is-pressed .key-cap {
+            transform: translateY(8px);
+        }
+
+        .tutorial-key.is-pressed .key-cap rect {
+            fill: var(--bg-active);
+            stroke: var(--bg-hover);
+        }
+
+        .tutorial-key .key-plus {
+            fill: var(--text);
+            letter-spacing: 0;
+        }
+
+        .tutorial-key svg {
+            display: block;
+        }
+
         /* 10. Footer ---------------------------------------------------------------- */
 
         footer {
@@ -1394,6 +1442,7 @@
 <div class="tutorial-overlay" id="tutorialOverlay"></div>
 <div class="tutorial-arrow" id="tutorialArrow">&darr;</div>
 <div class="tutorial-arrow" id="tutorialArrow2">&darr;</div>
+<div class="tutorial-key" id="tutorialKey"></div>
 <div class="tutorial-bubble" id="tutorialBubble">
     <div id="tutorialText"></div>
 </div>

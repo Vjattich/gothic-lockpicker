@@ -5,6 +5,7 @@ const
     tutorialText = document.getElementById('tutorialText'),
     tutorialArrow = document.getElementById('tutorialArrow'),
     tutorialArrow2 = document.getElementById('tutorialArrow2'),
+    tutorialKey = document.getElementById('tutorialKey'),
     questionMarkBtn = document.querySelector('.question-mark'),
     iconQm = document.getElementById('icon-qm'),
     iconX = document.getElementById('icon-x'),
@@ -37,6 +38,13 @@ function stepSleep(ms) {
     });
 }
 
+const HOTKEYS = {
+    next: {btn: nextBtn, labels: ['SPACE'], code: 'Space', key: ' ', ctrl: false},
+    prev: {btn: prevBtn, labels: ['CTRL', 'SPACE'], code: 'Space', key: ' ', ctrl: true},
+    restart: {btn: restartSeqBtn, labels: ['BACKSPACE'], code: 'Backspace', key: 'Backspace', ctrl: false},
+    reset: {btn: resetBtn, labels: ['CTRL', 'BACKSPACE'], code: 'Backspace', key: 'Backspace', ctrl: true}
+};
+
 function positionArrowRelative(target, offsetX = 0, offsetY = 0, arrowElement = tutorialArrow) {
     if (!target) return;
     const rect = target.getBoundingClientRect();
@@ -48,6 +56,53 @@ function positionArrowRelative(target, offsetX = 0, offsetY = 0, arrowElement = 
 function hideArrows() {
     tutorialArrow.style.display = 'none';
     tutorialArrow2.style.display = 'none';
+}
+
+function renderHotkeyCaps(labels) {
+    let x = 3, bases = '', caps = '', plus = '';
+    labels.forEach((label, i) => {
+        const w = label.length * 13 + 26;
+        if (i) plus += `<text class="key-plus" x="${x - 8}" y="22">+</text>`;
+        bases += `<rect class="key-base" x="${x}" y="11" width="${w}" height="38" rx="8"/>`;
+        caps += `<rect x="${x}" y="3" width="${w}" height="38" rx="8"/><text x="${x + w / 2}" y="22">${label}</text>`;
+        x += w + 16;
+    });
+    const width = x - 13;
+    tutorialKey.innerHTML = `<svg height="52" viewBox="0 0 ${width} 52" width="${width}">${bases}${plus}<g class="key-cap">${caps}</g></svg>`;
+}
+
+function showHotkey(hotkey) {
+    if (document.activeElement) document.activeElement.blur();
+    renderHotkeyCaps(hotkey.labels);
+    const rect = hotkey.btn.getBoundingClientRect();
+    tutorialKey.style.display = 'block';
+    tutorialKey.style.top = `${rect.bottom + 14}px`;
+    tutorialKey.style.left = `${Math.max(tutorialKey.offsetWidth / 2 + 10, rect.left + rect.width / 2)}px`;
+}
+
+function hideHotkey() {
+    tutorialKey.style.display = 'none';
+    tutorialKey.classList.remove('is-pressed');
+}
+
+function dispatchHotkey(type, hotkey) {
+    document.dispatchEvent(new KeyboardEvent(type, {
+        code: hotkey.code,
+        key: hotkey.key,
+        ctrlKey: hotkey.ctrl,
+        bubbles: true,
+        cancelable: true
+    }));
+}
+
+async function pressHotkey(hotkey, holdMs) {
+    tutorialKey.classList.add('is-pressed');
+    pressButtonVisual(hotkey.btn);
+    dispatchHotkey('keydown', hotkey);
+    await stepSleep(holdMs);
+    dispatchHotkey('keyup', hotkey);
+    releaseButtonVisual(hotkey.btn);
+    tutorialKey.classList.remove('is-pressed');
 }
 
 function dispatchAll(el, ...types) {
@@ -144,6 +199,8 @@ function endTutorial() {
 
 function clean() {
     hideArrows();
+    hideHotkey();
+    endSpaceHold();
 
     tutorialSearchDemo = false;
     setSearchOpen(false);
@@ -170,7 +227,7 @@ function clean() {
         });
     }
 
-    [nextBtn, prevBtn].forEach(btn => {
+    [nextBtn, prevBtn, restartSeqBtn, resetBtn].forEach(btn => {
         if (btn) releaseButtonVisual(btn);
     });
 
@@ -183,6 +240,7 @@ function clean() {
 /**
  * The order of tutorial steps. tutorialStep is a 1-based index into this array,
  * so inserting a new step is just inserting its name here — no renumbering.
+ * resetHotkeys is keyboard-only, so it drops out of the order on mobile.
  */
 const TUTORIAL_ORDER = [
     'zoom',
@@ -191,6 +249,7 @@ const TUTORIAL_ORDER = [
     'groupPlates',
     'inspectGroups',
     'stepControls',
+    'resetHotkeys',
     'searchCount',
     'searchPick',
     'autoPlay',
@@ -198,7 +257,8 @@ const TUTORIAL_ORDER = [
 ];
 
 function currentStepName() {
-    return TUTORIAL_ORDER[tutorialStep - 1];
+    const order = TUTORIAL_ORDER.filter(name => !gameState.isMobile || 'resetHotkeys' !== name);
+    return order[tutorialStep - 1];
 }
 
 const TUTORIAL_STEPS = {
@@ -396,7 +456,7 @@ const TUTORIAL_STEPS = {
         clean();
         tutorialText.textContent = gameState.isMobile
             ? 'You can walk step-by-step by pressing step controls. If you hold it, it will move plates state-by-state.'
-            : 'If squashed is checked, plates will go from state-to-state. Without squashed, you can walk single steps.';
+            : 'Walk the solution with the step buttons, or with SPACE forward and CTRL+SPACE back. A tap moves a single step, holding it moves plates state-by-state. With squashed checked, every tap already goes state-to-state.';
         resetBtn.click();
         await stepSleep(200);
         if (cancelled()) return;
@@ -412,6 +472,19 @@ const TUTORIAL_STEPS = {
         solveBtn.click();
         while (solveBtn.disabled && !cancelled()) await stepSleep(200);
         if (cancelled()) return;
+
+        const demoStepKey = async (hotkey) => {
+            positionArrowRelative(hotkey.btn, 15, -40);
+            showHotkey(hotkey);
+            await stepSleep(600);
+            for (let i = 0; i < 3 && !cancelled(); i++) {
+                await pressHotkey(hotkey, 140);
+                await stepSleep(700);
+            }
+            if (cancelled()) return;
+            await pressHotkey(hotkey, HOLD_STEP_DURATION + 250);
+            await stepSleep(900);
+        };
 
         const demoClicks = async (btn, times, delay) => {
             positionArrowRelative(btn, 15, -40);
@@ -436,10 +509,55 @@ const TUTORIAL_STEPS = {
                 await simulateHold(prevBtn, 1500);
                 await stepSleep(800);
             } else {
-                await demoClicks(nextBtn, 3, 800);
+                jumpToStep(1);
+                await demoStepKey(HOTKEYS.next);
                 if (cancelled()) break;
-                await demoClicks(prevBtn, 3, 800);
+                await demoStepKey(HOTKEYS.prev);
             }
+        }
+    },
+
+    async resetHotkeys(cancelled) {
+        clean();
+        tutorialText.textContent = 'BACKSPACE rewinds a solved sequence back to its first step. CTRL+BACKSPACE clears the lock itself, so you can set up a new one.';
+
+        const messy = [HOLE_SPACING, -HOLE_SPACING * 2, HOLE_SPACING * 2, -HOLE_SPACING, HOLE_SPACING * 3, -HOLE_SPACING];
+
+        while (!cancelled()) {
+            gameState.blocks.forEach((b, i) => {
+                updateBlockState(b, {x: messy[i] || 0, transition: 'transform 0.5s ease', pinTime: 400});
+            });
+            await stepSleep(700);
+            if (cancelled()) break;
+
+            solveBtn.click();
+            while (solveBtn.disabled && !cancelled()) await stepSleep(200);
+            if (cancelled()) break;
+
+            for (let i = 0; i < 4 && !cancelled(); i++) {
+                nextBtn.click();
+                await stepSleep(450);
+            }
+            if (cancelled()) break;
+
+            positionArrowRelative(restartSeqBtn, 10, -40);
+            showHotkey(HOTKEYS.restart);
+            await stepSleep(900);
+            if (cancelled()) break;
+
+            await pressHotkey(HOTKEYS.restart, 160);
+            await stepSleep(1600);
+            if (cancelled()) break;
+
+            positionArrowRelative(resetBtn, 15, -40);
+            showHotkey(HOTKEYS.reset);
+            await stepSleep(900);
+            if (cancelled()) break;
+
+            await pressHotkey(HOTKEYS.reset, 160);
+            hideArrows();
+            hideHotkey();
+            await stepSleep(1600);
         }
     },
 
