@@ -5,6 +5,7 @@ const
     tutorialText = document.getElementById('tutorialText'),
     tutorialArrow = document.getElementById('tutorialArrow'),
     tutorialArrow2 = document.getElementById('tutorialArrow2'),
+    tutorialKey = document.getElementById('tutorialKey'),
     questionMarkBtn = document.querySelector('.question-mark'),
     iconQm = document.getElementById('icon-qm'),
     iconX = document.getElementById('icon-x'),
@@ -48,6 +49,33 @@ function positionArrowRelative(target, offsetX = 0, offsetY = 0, arrowElement = 
 function hideArrows() {
     tutorialArrow.style.display = 'none';
     tutorialArrow2.style.display = 'none';
+}
+
+function showSpaceKey(target) {
+    if (document.activeElement) document.activeElement.blur();
+    const rect = target.getBoundingClientRect();
+    tutorialKey.style.top = `${rect.bottom + 14}px`;
+    tutorialKey.style.left = `${rect.left + rect.width / 2}px`;
+    tutorialKey.style.display = 'block';
+}
+
+function hideSpaceKey() {
+    tutorialKey.style.display = 'none';
+    tutorialKey.classList.remove('is-pressed');
+}
+
+function dispatchSpace(type) {
+    document.dispatchEvent(new KeyboardEvent(type, {code: 'Space', key: ' ', bubbles: true, cancelable: true}));
+}
+
+async function pressSpaceKey(holdMs) {
+    tutorialKey.classList.add('is-pressed');
+    pressButtonVisual(nextBtn);
+    dispatchSpace('keydown');
+    await stepSleep(holdMs);
+    dispatchSpace('keyup');
+    releaseButtonVisual(nextBtn);
+    tutorialKey.classList.remove('is-pressed');
 }
 
 function dispatchAll(el, ...types) {
@@ -144,6 +172,8 @@ function endTutorial() {
 
 function clean() {
     hideArrows();
+    hideSpaceKey();
+    endSpaceHold();
 
     tutorialSearchDemo = false;
     setSearchOpen(false);
@@ -396,7 +426,7 @@ const TUTORIAL_STEPS = {
         clean();
         tutorialText.textContent = gameState.isMobile
             ? 'You can walk step-by-step by pressing step controls. If you hold it, it will move plates state-by-state.'
-            : 'If squashed is checked, plates will go from state-to-state. Without squashed, you can walk single steps.';
+            : 'Walk the solution with the step buttons or the SPACE key. A tap moves a single step, holding it moves plates state-by-state. With squashed checked, every tap already goes state-to-state.';
         resetBtn.click();
         await stepSleep(200);
         if (cancelled()) return;
@@ -436,8 +466,23 @@ const TUTORIAL_STEPS = {
                 await simulateHold(prevBtn, 1500);
                 await stepSleep(800);
             } else {
-                await demoClicks(nextBtn, 3, 800);
+                jumpToStep(1);
+                positionArrowRelative(nextBtn, 15, -40);
+                showSpaceKey(nextBtn);
+                await stepSleep(600);
                 if (cancelled()) break;
+
+                for (let i = 0; i < 3 && !cancelled(); i++) {
+                    await pressSpaceKey(140);
+                    await stepSleep(700);
+                }
+                if (cancelled()) break;
+
+                await pressSpaceKey(HOLD_STEP_DURATION + 250);
+                await stepSleep(900);
+                if (cancelled()) break;
+
+                hideSpaceKey();
                 await demoClicks(prevBtn, 3, 800);
             }
         }

@@ -976,6 +976,45 @@
             50%      { transform: translateY(-15px); }
         }
 
+        .tutorial-key {
+            position: absolute;
+            display: none;
+            z-index: 1000;
+            pointer-events: none;
+            transform: translateX(-50%);
+        }
+
+        .tutorial-key .key-base {
+            fill: var(--dark);
+            stroke: var(--border);
+        }
+
+        .tutorial-key .key-cap {
+            transition: transform 0.08s ease;
+        }
+
+        .tutorial-key .key-cap rect {
+            fill: var(--surface-2);
+            stroke: var(--plate-border);
+        }
+
+        .tutorial-key text {
+            fill: #fff;
+            font: bold 16px monospace;
+            letter-spacing: 3px;
+            text-anchor: middle;
+            dominant-baseline: middle;
+        }
+
+        .tutorial-key.is-pressed .key-cap {
+            transform: translateY(8px);
+        }
+
+        .tutorial-key.is-pressed .key-cap rect {
+            fill: var(--bg-active);
+            stroke: var(--bg-hover);
+        }
+
         /* 10. Footer ---------------------------------------------------------------- */
 
         footer {
@@ -1394,6 +1433,15 @@
 <div class="tutorial-overlay" id="tutorialOverlay"></div>
 <div class="tutorial-arrow" id="tutorialArrow">&darr;</div>
 <div class="tutorial-arrow" id="tutorialArrow2">&darr;</div>
+<div class="tutorial-key" id="tutorialKey">
+    <svg height="52" viewBox="0 0 140 52" width="140" xmlns="http://www.w3.org/2000/svg">
+        <rect class="key-base" height="38" rx="8" width="134" x="3" y="11"/>
+        <g class="key-cap">
+            <rect height="38" rx="8" width="134" x="3" y="3"/>
+            <text x="70" y="22">SPACE</text>
+        </g>
+    </svg>
+</div>
 <div class="tutorial-bubble" id="tutorialBubble">
     <div id="tutorialText"></div>
 </div>
