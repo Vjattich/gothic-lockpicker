@@ -1557,6 +1557,7 @@ inspectorRow.addEventListener('touchcancel', resetInspectorHover);
 
 let spaceHeld = false,
     spaceStepped = false,
+    spaceBtn = nextBtn,
     spaceAnimTimer = null,
     spaceHoldTimer = null;
 
@@ -1568,7 +1569,7 @@ function isTypingTarget() {
 function endSpaceHold() {
     clearTimeout(spaceAnimTimer);
     clearTimeout(spaceHoldTimer);
-    nextBtn.classList.remove(UI_CLASSES.PRESSING);
+    spaceBtn.classList.remove(UI_CLASSES.PRESSING);
     spaceHeld = false;
 }
 
@@ -1584,23 +1585,32 @@ document.addEventListener('keydown', (e) => {
     if ('Space' !== e.code && ' ' !== e.key) return;
     e.preventDefault();
     if (e.repeat || spaceHeld) return;
-    if (nextBtn.disabled || null === playback.solution || playback.isPlaying) return;
+    if (null === playback.solution || playback.isPlaying) return;
+
+    const back = e.ctrlKey;
+    const btn = back ? prevBtn : nextBtn;
+    if (btn.disabled) return;
 
     spaceHeld = true;
     spaceStepped = false;
-    spaceAnimTimer = setTimeout(() => nextBtn.classList.add(UI_CLASSES.PRESSING), PRESS_ANIM_DELAY);
+    spaceBtn = btn;
+    spaceAnimTimer = setTimeout(() => btn.classList.add(UI_CLASSES.PRESSING), PRESS_ANIM_DELAY);
     spaceHoldTimer = setTimeout(() => {
-        nextBtn.classList.remove(UI_CLASSES.PRESSING);
+        btn.classList.remove(UI_CLASSES.PRESSING);
         spaceStepped = true;
-        stepForward(true);
+        if (back) stepBackward(true);
+        else stepForward(true);
     }, HOLD_STEP_DURATION);
 });
 
 document.addEventListener('keyup', (e) => {
     if ('Space' !== e.code && ' ' !== e.key) return;
     if (!spaceHeld) return;
+    const back = prevBtn === spaceBtn;
     endSpaceHold();
-    if (!spaceStepped) stepForward(false);
+    if (spaceStepped) return;
+    if (back) stepBackward(false);
+    else stepForward(false);
 });
 
 window.addEventListener('blur', endSpaceHold);

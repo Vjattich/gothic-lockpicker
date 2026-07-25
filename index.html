@@ -1015,6 +1015,11 @@
             stroke: var(--bg-hover);
         }
 
+        .tutorial-key .key-plus {
+            fill: var(--text);
+            letter-spacing: 0;
+        }
+
         /* 10. Footer ---------------------------------------------------------------- */
 
         footer {
@@ -1433,12 +1438,25 @@
 <div class="tutorial-overlay" id="tutorialOverlay"></div>
 <div class="tutorial-arrow" id="tutorialArrow">&darr;</div>
 <div class="tutorial-arrow" id="tutorialArrow2">&darr;</div>
-<div class="tutorial-key" id="tutorialKey">
+<div class="tutorial-key" id="tutorialKeyNext">
     <svg height="52" viewBox="0 0 140 52" width="140" xmlns="http://www.w3.org/2000/svg">
         <rect class="key-base" height="38" rx="8" width="134" x="3" y="11"/>
         <g class="key-cap">
             <rect height="38" rx="8" width="134" x="3" y="3"/>
             <text x="70" y="22">SPACE</text>
+        </g>
+    </svg>
+</div>
+<div class="tutorial-key" id="tutorialKeyPrev">
+    <svg height="52" viewBox="0 0 232 52" width="232" xmlns="http://www.w3.org/2000/svg">
+        <rect class="key-base" height="38" rx="8" width="76" x="3" y="11"/>
+        <rect class="key-base" height="38" rx="8" width="134" x="95" y="11"/>
+        <text class="key-plus" x="87" y="22">+</text>
+        <g class="key-cap">
+            <rect height="38" rx="8" width="76" x="3" y="3"/>
+            <text x="41" y="22">CTRL</text>
+            <rect height="38" rx="8" width="134" x="95" y="3"/>
+            <text x="162" y="22">SPACE</text>
         </g>
     </svg>
 </div>

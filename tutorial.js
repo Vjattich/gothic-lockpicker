@@ -5,7 +5,8 @@ const
     tutorialText = document.getElementById('tutorialText'),
     tutorialArrow = document.getElementById('tutorialArrow'),
     tutorialArrow2 = document.getElementById('tutorialArrow2'),
-    tutorialKey = document.getElementById('tutorialKey'),
+    tutorialKeyNext = document.getElementById('tutorialKeyNext'),
+    tutorialKeyPrev = document.getElementById('tutorialKeyPrev'),
     questionMarkBtn = document.querySelector('.question-mark'),
     iconQm = document.getElementById('icon-qm'),
     iconX = document.getElementById('icon-x'),
@@ -51,31 +52,36 @@ function hideArrows() {
     tutorialArrow2.style.display = 'none';
 }
 
-function showSpaceKey(target) {
+function showStepKey(btn) {
     if (document.activeElement) document.activeElement.blur();
-    const rect = target.getBoundingClientRect();
-    tutorialKey.style.top = `${rect.bottom + 14}px`;
-    tutorialKey.style.left = `${rect.left + rect.width / 2}px`;
-    tutorialKey.style.display = 'block';
+    const key = prevBtn === btn ? tutorialKeyPrev : tutorialKeyNext;
+    const rect = btn.getBoundingClientRect();
+    key.style.display = 'block';
+    key.style.top = `${rect.bottom + 14}px`;
+    key.style.left = `${Math.max(key.offsetWidth / 2 + 10, rect.left + rect.width / 2)}px`;
 }
 
-function hideSpaceKey() {
-    tutorialKey.style.display = 'none';
-    tutorialKey.classList.remove('is-pressed');
+function hideStepKeys() {
+    [tutorialKeyNext, tutorialKeyPrev].forEach(key => {
+        key.style.display = 'none';
+        key.classList.remove('is-pressed');
+    });
 }
 
-function dispatchSpace(type) {
-    document.dispatchEvent(new KeyboardEvent(type, {code: 'Space', key: ' ', bubbles: true, cancelable: true}));
+function dispatchSpace(type, ctrl) {
+    document.dispatchEvent(new KeyboardEvent(type, {code: 'Space', key: ' ', ctrlKey: ctrl, bubbles: true, cancelable: true}));
 }
 
-async function pressSpaceKey(holdMs) {
-    tutorialKey.classList.add('is-pressed');
-    pressButtonVisual(nextBtn);
-    dispatchSpace('keydown');
+async function pressStepKey(btn, holdMs) {
+    const back = prevBtn === btn;
+    const key = back ? tutorialKeyPrev : tutorialKeyNext;
+    key.classList.add('is-pressed');
+    pressButtonVisual(btn);
+    dispatchSpace('keydown', back);
     await stepSleep(holdMs);
-    dispatchSpace('keyup');
-    releaseButtonVisual(nextBtn);
-    tutorialKey.classList.remove('is-pressed');
+    dispatchSpace('keyup', back);
+    releaseButtonVisual(btn);
+    key.classList.remove('is-pressed');
 }
 
 function dispatchAll(el, ...types) {
@@ -172,7 +178,7 @@ function endTutorial() {
 
 function clean() {
     hideArrows();
-    hideSpaceKey();
+    hideStepKeys();
     endSpaceHold();
 
     tutorialSearchDemo = false;
@@ -426,7 +432,7 @@ const TUTORIAL_STEPS = {
         clean();
         tutorialText.textContent = gameState.isMobile
             ? 'You can walk step-by-step by pressing step controls. If you hold it, it will move plates state-by-state.'
-            : 'Walk the solution with the step buttons or the SPACE key. A tap moves a single step, holding it moves plates state-by-state. With squashed checked, every tap already goes state-to-state.';
+            : 'Walk the solution with the step buttons, or with SPACE forward and CTRL+SPACE back. A tap moves a single step, holding it moves plates state-by-state. With squashed checked, every tap already goes state-to-state.';
         resetBtn.click();
         await stepSleep(200);
         if (cancelled()) return;
@@ -442,6 +448,20 @@ const TUTORIAL_STEPS = {
         solveBtn.click();
         while (solveBtn.disabled && !cancelled()) await stepSleep(200);
         if (cancelled()) return;
+
+        const demoStepKey = async (btn) => {
+            hideStepKeys();
+            positionArrowRelative(btn, 15, -40);
+            showStepKey(btn);
+            await stepSleep(600);
+            for (let i = 0; i < 3 && !cancelled(); i++) {
+                await pressStepKey(btn, 140);
+                await stepSleep(700);
+            }
+            if (cancelled()) return;
+            await pressStepKey(btn, HOLD_STEP_DURATION + 250);
+            await stepSleep(900);
+        };
 
         const demoClicks = async (btn, times, delay) => {
             positionArrowRelative(btn, 15, -40);
@@ -467,23 +487,9 @@ const TUTORIAL_STEPS = {
                 await stepSleep(800);
             } else {
                 jumpToStep(1);
-                positionArrowRelative(nextBtn, 15, -40);
-                showSpaceKey(nextBtn);
-                await stepSleep(600);
+                await demoStepKey(nextBtn);
                 if (cancelled()) break;
-
-                for (let i = 0; i < 3 && !cancelled(); i++) {
-                    await pressSpaceKey(140);
-                    await stepSleep(700);
-                }
-                if (cancelled()) break;
-
-                await pressSpaceKey(HOLD_STEP_DURATION + 250);
-                await stepSleep(900);
-                if (cancelled()) break;
-
-                hideSpaceKey();
-                await demoClicks(prevBtn, 3, 800);
+                await demoStepKey(prevBtn);
             }
         }
     },
