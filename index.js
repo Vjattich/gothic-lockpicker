@@ -140,6 +140,7 @@ const gameState = {
 const pinchState = {initialDistance: 0, initialScale: 0, lastScale: 0};
 
 const playback = {
+    isSolving: false,
     solution: null,
     stepIndex: 0,
     isPlaying: false,
@@ -149,7 +150,7 @@ const playback = {
 };
 
 let isGuideActive = false,
-    tutorialSearchDemo = false; //tutorial.js changes
+    tutorialSearchDemo = false;
 
 function setInitialState() {
     gameState.isMobile = 768 >= window.innerWidth;
@@ -318,6 +319,11 @@ function getCatalogueMatches(catalogue) {
 let lastMatches = [];
 
 function refreshMatches() {
+
+    if (playback.isSolving) {
+        return;
+    }
+
     const matches = getCatalogueMatches();
     updateMatchCount(matches);
     renderSearchList(matches);
@@ -574,11 +580,14 @@ solveBtn.addEventListener('click', async () => {
             setStatus('Solver timed out!', 'error');
         } else if (!result || !result.moves) {
             setStatus('No solution found', 'error');
-        } else if (result.moves.length === 0) {
+        } else if (0 === result.moves.length) {
             setStatus('', 'info');
         } else {
+            //do it zero while have solve
+            updateMatchCount([]);
             playback.solution = result.moves;
             playback.stepIndex = 0;
+            playback.isSolving = true;
             setStatus(`${result.moves.length} moves!`, 'success');
             playBtn.style.display = 'block';
             restartSeqBtn.style.display = 'block';
@@ -752,9 +761,12 @@ function scheduleGlowFadeOut(hole) {
 function updatePlaybackUI() {
     if (null === playback.solution) return;
 
+    const isLastMove = playback.stepIndex === playback.solution.length;
+    playback.isSolving = !isLastMove;
+    nextBtn.disabled = isLastMove || playback.isPlaying;
+    playBtn.disabled = isLastMove;
     prevBtn.disabled = (0 === playback.stepIndex) || playback.isPlaying;
-    nextBtn.disabled = (playback.stepIndex === playback.solution.length) || playback.isPlaying;
-    playBtn.disabled = (playback.stepIndex === playback.solution.length);
+
     restartSeqBtn.disabled = playback.isPlaying;
     solveBtn.disabled = playback.isPlaying;
 
@@ -796,7 +808,7 @@ function updatePlaybackUI() {
             const
                 currentHoleOffset = Math.round(activeBlock.x / HOLE_SPACING),
                 currentPinHole = 3 - currentHoleOffset,
-                targetHoleIndex = nextMove.direction === 'right'
+                targetHoleIndex = 'right' === nextMove.direction
                     ? currentPinHole - moveCount
                     : currentPinHole + moveCount;
 
