@@ -695,6 +695,10 @@ function stepForward(forceSquash = false) {
 
 function stepBackward(forceSquash = false) {
     if (null === playback.solution || playback.isPlaying || playback.stepIndex <= 0) return;
+    if (!gameState.isSolving) {
+        gameState.isSolving = true;
+        updateMatchCount([]);
+    }
     if (squashMovesCheck.checked || forceSquash) {
         jumpToStep(getPrevSquashedIndex());
     } else {
