@@ -116,6 +116,7 @@ const
 
 const gameState = {
     isInteracted: false,
+    isSolving: false,
     isRender: false,
     blocks: [],
     activeLinkerId: null,
@@ -320,7 +321,7 @@ let lastMatches = [];
 
 function refreshMatches() {
 
-    if (playback.isSolving) {
+    if (gameState.isSolving) {
         return;
     }
 
@@ -537,6 +538,7 @@ function solveInWorker() {
 }
 
 function clearSolutionUI() {
+    gameState.isSolving = false;
     playback.solution = null;
     playback.stepIndex = 0;
     playback.isPlaying = false;
@@ -587,7 +589,7 @@ solveBtn.addEventListener('click', async () => {
             updateMatchCount([]);
             playback.solution = result.moves;
             playback.stepIndex = 0;
-            playback.isSolving = true;
+            gameState.isSolving = true;
             setStatus(`${result.moves.length} moves!`, 'success');
             playBtn.style.display = 'block';
             restartSeqBtn.style.display = 'block';
@@ -730,6 +732,8 @@ playBtn.addEventListener('click', async () => {
 
 restartSeqBtn.addEventListener('click', () => {
     if (null === playback.solution || playback.isPlaying) return;
+    gameState.isSolving = true;
+    updateMatchCount([]);
     setStatus('Restarting sequence...', 'info');
     while (playback.stepIndex > 0) {
         applySingleMove(playback.solution[playback.stepIndex - 1], true);
@@ -762,7 +766,7 @@ function updatePlaybackUI() {
     if (null === playback.solution) return;
 
     const isLastMove = playback.stepIndex === playback.solution.length;
-    playback.isSolving = !isLastMove;
+    gameState.isSolving = !isLastMove;
     nextBtn.disabled = isLastMove || playback.isPlaying;
     playBtn.disabled = isLastMove;
     prevBtn.disabled = (0 === playback.stepIndex) || playback.isPlaying;
@@ -1175,6 +1179,7 @@ resetBtn.addEventListener('click', () => {
     gameState.dragState.activePlate = null;
     gameState.dragState.movingGroup = [];
     gameState.dragState.isDragging = false;
+    gameState.isSolving = false;
     clearTimeout(gameState.dragState.longPressTimer);
     renderBlocks();
     refreshMatches();
