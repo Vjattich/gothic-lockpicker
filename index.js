@@ -15,7 +15,8 @@ const UI_CLASSES = {
     PLATE: 'plate',
     HOLE: 'hole',
     ZOOMING: 'is-zooming',
-    DRAGGING: 'is-dragging'
+    DRAGGING: 'is-dragging',
+    ORBITING: 'is-orbiting'
 };
 
 const ACTIONS = {
@@ -140,6 +141,8 @@ const gameState = {
 
 const pinchState = {initialDistance: 0, initialScale: 0, lastScale: 0};
 
+let lastMatches = [];
+
 const playback = {
     isSolving: false,
     solution: null,
@@ -189,6 +192,10 @@ const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
 function getClientX(e) {
     return e.touches && e.touches.length > 0 ? e.touches[0].clientX : e.clientX;
+}
+
+function getClientY(e) {
+    return e.touches && e.touches.length > 0 ? e.touches[0].clientY : e.clientY;
 }
 
 function vibrate(duration) {
@@ -254,13 +261,31 @@ searchCloseBtn.addEventListener('click', (e) => {
 });
 
 
+let pickedLockTitle = null;
+
+/** Show the name of the loaded catalogue lock in place of the match count. */
+function setPickedLock(title) {
+    pickedLockTitle = title || null;
+    refreshMatchLabel(lastMatches.length);
+}
+
+function clearPickedLock() {
+    if (null === pickedLockTitle) return;
+    pickedLockTitle = null;
+    refreshMatchLabel(lastMatches.length);
+}
+
+function refreshMatchLabel(n) {
+    matchCountText.textContent = pickedLockTitle || (n + (1 === n ? ' lock' : ' locks'));
+    searchToggle.classList.toggle('has-matches', n > 0 || null !== pickedLockTitle);
+}
+
 function updateMatchCount(matches) {
     if (isGuideActive && !tutorialSearchDemo) {
         return;
     }
     const n = matches.length;
-    matchCountText.textContent = n + (1 === n ? ' lock' : ' locks');
-    searchToggle.classList.toggle('has-matches', n > 0);
+    refreshMatchLabel(n);
     searchEmpty.style.display = n > 0 ? 'none' : 'block';
 }
 
@@ -316,8 +341,6 @@ function getCatalogueMatches(catalogue) {
 
     return candidates.filter(e => e.links === links);
 }
-
-let lastMatches = [];
 
 function refreshMatches() {
 
@@ -375,6 +398,7 @@ function loadCatalogueLock(entry) {
 
     setSearchOpen(false);
     applySetup(setup, true);
+    setPickedLock(decodeTitle(entry.title));
     scheduleMatchRefresh();
     solveBtn.click();
 }
@@ -480,9 +504,9 @@ shareBtn.addEventListener('click', () => {
     navigator.clipboard.writeText(url.toString()).then(() => {
 
         const message = 'Copied to clipboard!',
-              idx =statusMsg.className.lastIndexOf('-') + 1,
-              prevMessage = statusMsg.textContent,
-              prevMessageType =  statusMsg.className.substring(idx, statusMsg.className.length)
+            idx =statusMsg.className.lastIndexOf('-') + 1,
+            prevMessage = statusMsg.textContent,
+            prevMessageType =  statusMsg.className.substring(idx, statusMsg.className.length)
 
         setStatus(message, 'success');
         clearTimeout(shareStatusTimeout);
@@ -1082,10 +1106,14 @@ function createPlate(id, prevX, zPos) {
     pin.dataset.wasOverHole = 'true';
 
     plate.addEventListener('mouseenter', () => {
+        if (gameState.dragState.activePlate) return;
         if (Date.now() - (gameState.lastTouchTime || 0) < 500) return; // ignore synthetic post-touch hover
         updateHoverPreview(plate);
     });
-    plate.addEventListener('mouseleave', () => clearHoverPreview(true));
+    plate.addEventListener('mouseleave', () => {
+        if (gameState.dragState.activePlate) return;
+        clearHoverPreview(true);
+    });
     plate.addEventListener('touchstart', () => clearHoverPreview(true), {passive: true});
 
     return {plate, pinWrapper, pin};
@@ -1177,6 +1205,7 @@ btnDecrease.addEventListener('click', () => stepBlockCount(-1));
 btnIncrease.addEventListener('click', () => stepBlockCount(+1));
 
 resetBtn.addEventListener('click', () => {
+    clearPickedLock();
     clearSolutionUI();
     gameState.blocks = [];
     gameState.activeLinkerId = null;
@@ -1308,7 +1337,10 @@ function handleDragStart(e) {
     }
 
     const clickedPlate = e.target.closest(`.${UI_CLASSES.PLATE}`);
-    if (!clickedPlate) return;
+    if (!clickedPlate) {
+        startOrbit(e);
+        return;
+    }
 
     if (e.type === 'mousedown') e.preventDefault();
     if (playback.solution) clearSolutionUI();
@@ -1383,6 +1415,11 @@ function handleDragMove(e) {
         return;
     }
 
+    if (orbitState.active) {
+        moveOrbit(e);
+        return;
+    }
+
     const dragState = gameState.dragState;
     if (!dragState.activePlate || 0 === dragState.movingGroup.length || gameState.activeLinkerId) return;
 
@@ -1396,6 +1433,8 @@ function handleDragMove(e) {
 }
 
 function handleDragEnd(e) {
+    endOrbit();
+
     const {dragState} = gameState;
     const {activePlate, movingGroup, isDragging} = dragState;
 
@@ -1506,6 +1545,125 @@ function setupLongPress(button, stepFunction) {
         stepFunction(false);
     });
 }
+
+/* 11b. Camera orbit ----------------------------------------------------------
+   The lock is a CSS 3D scene, so "the camera" is just the two rotations on
+   .lock-mechanism. Dragging any empty space turns them; double-clicking that
+   same empty space puts them back. Plates keep the pointer for themselves, so
+   this only ever runs when the press missed one.
+ */
+
+const
+    CAMERA_REST = {rx: -35, ry: -45},
+    CAMERA_RANGE = {rx: [-85, 0], ry: [-85, 0]},
+    ORBIT_DEG_PER_PX = 0.4,
+    DOUBLE_TAP_MS = 320,
+    ORBIT_BLOCKERS = '.controls, footer, .about-panel, .search-panel, .tutorial-bubble, .tutorial-key, a, button, input';
+
+const camera = {rx: CAMERA_REST.rx, ry: CAMERA_REST.ry};
+
+const orbitState = {
+    active: false,
+    moved: false,
+    startX: 0,
+    startY: 0,
+    currentX: 0,
+    currentY: 0,
+    startRx: 0,
+    startRy: 0,
+    rafId: null,
+    lastTapTime: 0
+};
+
+const clampAngle = (deg, [min, max]) => Math.max(min, Math.min(deg, max));
+
+function setCamera(rx, ry) {
+    camera.rx = clampAngle(rx, CAMERA_RANGE.rx);
+    camera.ry = clampAngle(ry, CAMERA_RANGE.ry);
+    const style = document.documentElement.style;
+    style.setProperty('--cam-rx', `${camera.rx.toFixed(2)}deg`);
+    style.setProperty('--cam-ry', `${camera.ry.toFixed(2)}deg`);
+}
+
+function resetCamera() {
+    document.body.classList.remove(UI_CLASSES.ORBITING);
+    setCamera(CAMERA_REST.rx, CAMERA_REST.ry);
+}
+
+function isOrbitSurface(target) {
+    return target instanceof Element && !target.closest(ORBIT_BLOCKERS);
+}
+
+function applyOrbit() {
+    orbitState.rafId = null;
+    if (!orbitState.active) return;
+
+    const
+        dx = orbitState.currentX - orbitState.startX,
+        dy = orbitState.currentY - orbitState.startY;
+
+    if (!orbitState.moved) {
+        if (Math.hypot(dx, dy) < DRAG_THRESHOLD) return;
+        orbitState.moved = true;
+        document.body.classList.add(UI_CLASSES.ORBITING);
+    }
+
+    // Drag right and the front face follows the pointer; drag down and the top
+    // tips towards you. Both are the "grab the object" convention.
+    setCamera(
+        orbitState.startRx - dy * ORBIT_DEG_PER_PX,
+        orbitState.startRy + dx * ORBIT_DEG_PER_PX
+    );
+}
+
+function startOrbit(e) {
+    if (isGuideActive) return;
+    if (e.touches && 1 !== e.touches.length) return;
+    if (!isOrbitSurface(e.target)) return;
+
+    if (Date.now() - orbitState.lastTapTime < DOUBLE_TAP_MS) {
+        orbitState.lastTapTime = 0;
+        resetCamera();
+        return;
+    }
+
+    if ('mousedown' === e.type) e.preventDefault();
+
+    orbitState.active = true;
+    orbitState.moved = false;
+    orbitState.startX = orbitState.currentX = getClientX(e);
+    orbitState.startY = orbitState.currentY = getClientY(e);
+    orbitState.startRx = camera.rx;
+    orbitState.startRy = camera.ry;
+}
+
+function moveOrbit(e) {
+    if (e.cancelable) e.preventDefault();
+
+    orbitState.currentX = getClientX(e);
+    orbitState.currentY = getClientY(e);
+
+    if (!orbitState.rafId) {
+        orbitState.rafId = requestAnimationFrame(applyOrbit);
+    }
+}
+
+function endOrbit() {
+    if (!orbitState.active) return;
+
+    if (orbitState.rafId) {
+        cancelAnimationFrame(orbitState.rafId);
+        orbitState.rafId = null;
+    }
+
+    // A press that never moved is half of a double tap; a drag is not.
+    orbitState.lastTapTime = orbitState.moved ? 0 : Date.now();
+    orbitState.active = false;
+    orbitState.moved = false;
+    document.body.classList.remove(UI_CLASSES.ORBITING);
+}
+
+setCamera(CAMERA_REST.rx, CAMERA_REST.ry);
 
 /* 12. INSPECTOR ROW -------------------------------------------------------------------- */
 

@@ -7,11 +7,11 @@ const
     tutorialArrow2 = document.getElementById('tutorialArrow2'),
     tutorialKey = document.getElementById('tutorialKey'),
     questionMarkBtn = document.querySelector('.question-mark'),
-    iconQm = document.getElementById('icon-qm'),
-    iconX = document.getElementById('icon-x'),
     guidePrev = document.getElementById('guidePrev'),
     guideNext = document.getElementById('guideNext'),
-    footer = document.getElementById('footer');
+    footer = document.querySelector('footer'),
+    aboutPanel = document.getElementById('aboutPanel'),
+    aboutCloseBtn = document.getElementById('aboutClose');
 
 let tutorialStep = 0,
     currentTutorialVersion = 0,
@@ -146,6 +146,32 @@ guideNext.addEventListener('click', () => {
     advanceTutorial();
 });
 
+/**
+ * The About panel has no button of its own - the guide opens it as its last
+ * step (see TUTORIAL_STEPS.about) and closing it ends the guide. It stays in
+ * the DOM either way so its text is indexable.
+ */
+function setAboutOpen(open) {
+    aboutPanel.classList.toggle('is-open', open);
+}
+
+function dismissAbout() {
+    setAboutOpen(false);
+    if (isGuideActive) endTutorial();
+}
+
+aboutCloseBtn.addEventListener('click', dismissAbout);
+
+aboutPanel.addEventListener('click', (e) => {
+    if (e.target === aboutPanel) dismissAbout();
+});
+
+document.addEventListener('keydown', (e) => {
+    if ('Escape' === e.key && aboutPanel.classList.contains('is-open')) {
+        dismissAbout();
+    }
+});
+
 function advanceTutorial() {
     currentTutorialVersion++;
     wakeUpSleep();
@@ -155,14 +181,10 @@ function advanceTutorial() {
 function startTutorial() {
     updateMatchCount([]);
     isGuideActive = true;
-    document.body.classList.add('tutorial-active');
+    document.body.classList.add('tutorial-active', 'tutorial-on');
     resetBtn.click();
     tutorialOverlay.style.display = 'block';
     tutorialBubble.style.display = 'block';
-    guidePrev.style.display = 'flex';
-    guideNext.style.display = 'flex';
-    iconQm.style.display = 'none';
-    iconX.style.display = 'block';
     tutorialStep = 1;
     advanceTutorial();
     footer.style.zIndex = '1001';
@@ -175,18 +197,15 @@ function startTutorial() {
 function endTutorial() {
     isGuideActive = false;
     scheduleMatchRefresh();
-    document.body.classList.remove('tutorial-active');
+    document.body.classList.remove('tutorial-active', 'tutorial-on');
     currentTutorialVersion++;
     wakeUpSleep();
     tutorialOverlay.style.display = 'none';
     tutorialBubble.style.display = 'none';
+    setAboutOpen(false);
     hideArrows();
-    guidePrev.style.display = 'none';
-    guideNext.style.display = 'none';
-    iconQm.style.display = 'block';
-    iconX.style.display = 'none';
     resetBtn.click();
-    footer.style.zIndex = '1';
+    footer.style.zIndex = '';
     if (gameState.isMobile) {
         controls.style.top = '';
         setTimeout(() => {
@@ -201,6 +220,9 @@ function clean() {
     hideArrows();
     hideHotkey();
     endSpaceHold();
+    clearPickedLock();
+    setAboutOpen(false);
+    resetCamera();
 
     tutorialSearchDemo = false;
     setSearchOpen(false);
@@ -244,6 +266,7 @@ function clean() {
  */
 const TUTORIAL_ORDER = [
     'zoom',
+    'orbit',
     'dragPlates',
     'adjustPlates',
     'groupPlates',
@@ -253,7 +276,8 @@ const TUTORIAL_ORDER = [
     'searchCount',
     'searchPick',
     'autoPlay',
-    'share'
+    'share',
+    'about'
 ];
 
 function currentStepName() {
@@ -297,19 +321,56 @@ const TUTORIAL_STEPS = {
         setScale(baseScale);
     },
 
+    async orbit(cancelled) {
+        clean();
+
+        tutorialText.textContent = gameState.isMobile
+            ? 'Drag the empty space around the lock to turn it. Double-tap that space to put the view back.'
+            : 'Drag the empty space around the lock to turn it. Double-click that space to put the view back.';
+
+        const sweepTo = async (rx, ry, steps = 22) => {
+            const fromRx = camera.rx, fromRy = camera.ry;
+            for (let i = 1; i <= steps && !cancelled(); i++) {
+                const t = i / steps;
+                setCamera(fromRx + (rx - fromRx) * t, fromRy + (ry - fromRy) * t);
+                await stepSleep(40);
+            }
+        };
+
+        while (!cancelled()) {
+            await sweepTo(-14, -8);
+            await stepSleep(500);
+            if (cancelled()) break;
+
+            await sweepTo(-46, -72);
+            await stepSleep(500);
+            if (cancelled()) break;
+
+            await sweepTo(CAMERA_REST.rx, CAMERA_REST.ry);
+            await stepSleep(900);
+        }
+
+        resetCamera();
+    },
+
     async dragPlates(cancelled) {
         clean();
         tutorialText.textContent = 'You can drag selected plates left or right.';
         let plateIndex = 0;
+        const unhighlight = () => gameState.blocks
+            .forEach(b => b.el.classList.remove(UI_CLASSES.TOUCHED));
+
         while (!cancelled()) {
-            gameState.blocks.forEach(b => b.el.querySelector('.front-face').style.borderColor = '');
+            unhighlight();
             if (gameState.blocks.length > 0) {
-                const plate = gameState.blocks[plateIndex % gameState.blocks.length].el;
-                plate.querySelector('.front-face').style.borderColor = 'white';
+                gameState.blocks[plateIndex % gameState.blocks.length]
+                    .el.classList.add(UI_CLASSES.TOUCHED);
                 plateIndex++;
             }
             await stepSleep(600);
         }
+
+        unhighlight();
     },
 
     async adjustPlates(cancelled) {
@@ -573,7 +634,7 @@ const TUTORIAL_STEPS = {
             }
             resetBtn.click();
             refreshMatches();
-            positionArrowRelative(searchToggle, 15, -40);
+            positionArrowRelative(matchCountText, 15, -40);
             await stepSleep(1500);
             if (cancelled()) break;
 
@@ -686,6 +747,13 @@ const TUTORIAL_STEPS = {
             positionArrowRelative(steamGuideBtn, 15, -40, tutorialArrow2);
             await stepSleep(2000);
         }
+    },
+
+    async about(cancelled) {
+        clean();
+        tutorialText.textContent = 'That is the whole tool. The rest is written up here - close the panel when you are done.';
+        setAboutOpen(true);
+        while (!cancelled()) await stepSleep(500);
     }
 };
 
