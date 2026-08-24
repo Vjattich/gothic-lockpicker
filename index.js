@@ -141,6 +141,8 @@ const gameState = {
 
 const pinchState = {initialDistance: 0, initialScale: 0, lastScale: 0};
 
+let lastMatches = [];
+
 const playback = {
     isSolving: false,
     solution: null,
@@ -259,13 +261,31 @@ searchCloseBtn.addEventListener('click', (e) => {
 });
 
 
+let pickedLockTitle = null;
+
+/** Show the name of the loaded catalogue lock in place of the match count. */
+function setPickedLock(title) {
+    pickedLockTitle = title || null;
+    refreshMatchLabel(lastMatches.length);
+}
+
+function clearPickedLock() {
+    if (null === pickedLockTitle) return;
+    pickedLockTitle = null;
+    refreshMatchLabel(lastMatches.length);
+}
+
+function refreshMatchLabel(n) {
+    matchCountText.textContent = pickedLockTitle || (n + (1 === n ? ' lock' : ' locks'));
+    searchToggle.classList.toggle('has-matches', n > 0 || null !== pickedLockTitle);
+}
+
 function updateMatchCount(matches) {
     if (isGuideActive && !tutorialSearchDemo) {
         return;
     }
     const n = matches.length;
-    matchCountText.textContent = n + (1 === n ? ' lock' : ' locks');
-    searchToggle.classList.toggle('has-matches', n > 0);
+    refreshMatchLabel(n);
     searchEmpty.style.display = n > 0 ? 'none' : 'block';
 }
 
@@ -321,8 +341,6 @@ function getCatalogueMatches(catalogue) {
 
     return candidates.filter(e => e.links === links);
 }
-
-let lastMatches = [];
 
 function refreshMatches() {
 
@@ -380,6 +398,7 @@ function loadCatalogueLock(entry) {
 
     setSearchOpen(false);
     applySetup(setup, true);
+    setPickedLock(decodeTitle(entry.title));
     scheduleMatchRefresh();
     solveBtn.click();
 }
@@ -1087,10 +1106,14 @@ function createPlate(id, prevX, zPos) {
     pin.dataset.wasOverHole = 'true';
 
     plate.addEventListener('mouseenter', () => {
+        if (gameState.dragState.activePlate) return;
         if (Date.now() - (gameState.lastTouchTime || 0) < 500) return; // ignore synthetic post-touch hover
         updateHoverPreview(plate);
     });
-    plate.addEventListener('mouseleave', () => clearHoverPreview(true));
+    plate.addEventListener('mouseleave', () => {
+        if (gameState.dragState.activePlate) return;
+        clearHoverPreview(true);
+    });
     plate.addEventListener('touchstart', () => clearHoverPreview(true), {passive: true});
 
     return {plate, pinWrapper, pin};
@@ -1182,6 +1205,7 @@ btnDecrease.addEventListener('click', () => stepBlockCount(-1));
 btnIncrease.addEventListener('click', () => stepBlockCount(+1));
 
 resetBtn.addEventListener('click', () => {
+    clearPickedLock();
     clearSolutionUI();
     gameState.blocks = [];
     gameState.activeLinkerId = null;
@@ -1530,9 +1554,8 @@ function setupLongPress(button, stepFunction) {
  */
 
 const
-    CAMERA_REST = {rx: -30, ry: -40},
-    CAMERA_MIN = -85,
-    CAMERA_MAX = 85,
+    CAMERA_REST = {rx: -35, ry: -45},
+    CAMERA_RANGE = {rx: [-85, 0], ry: [-85, 0]},
     ORBIT_DEG_PER_PX = 0.4,
     DOUBLE_TAP_MS = 320,
     ORBIT_BLOCKERS = '.controls, footer, .about-panel, .search-panel, .tutorial-bubble, .tutorial-key, a, button, input';
@@ -1552,11 +1575,11 @@ const orbitState = {
     lastTapTime: 0
 };
 
-const clampAngle = (deg) => Math.max(CAMERA_MIN, Math.min(deg, CAMERA_MAX));
+const clampAngle = (deg, [min, max]) => Math.max(min, Math.min(deg, max));
 
 function setCamera(rx, ry) {
-    camera.rx = clampAngle(rx);
-    camera.ry = clampAngle(ry);
+    camera.rx = clampAngle(rx, CAMERA_RANGE.rx);
+    camera.ry = clampAngle(ry, CAMERA_RANGE.ry);
     const style = document.documentElement.style;
     style.setProperty('--cam-rx', `${camera.rx.toFixed(2)}deg`);
     style.setProperty('--cam-ry', `${camera.ry.toFixed(2)}deg`);
@@ -1571,7 +1594,6 @@ function isOrbitSurface(target) {
     return target instanceof Element && !target.closest(ORBIT_BLOCKERS);
 }
 
-/** rAF-batched, same as the plate drag: pointer events outrun repaints. */
 function applyOrbit() {
     orbitState.rafId = null;
     if (!orbitState.active) return;

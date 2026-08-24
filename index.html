@@ -78,7 +78,8 @@
                     "screenshot": "https://vjattich.github.io/medvejatnik/og-cover.png",
                     "sameAs": [
                         "https://github.com/Vjattich/gothic-lockpicker",
-                        "https://steamcommunity.com/sharedfiles/filedetails/?id=3744604034"
+                        "https://steamcommunity.com/sharedfiles/filedetails/?id=3744604034",
+                        "https://t.me/arsinioum"
                     ]
                 },
                 {
@@ -197,10 +198,8 @@
         :root {
             --block-scale: 1;
 
-            /* Camera. Drag the background to orbit it (see index.js, section
-               11b); these are the rest position it snaps back to. */
-            --cam-rx: -30deg;
-            --cam-ry: -40deg;
+            --cam-rx: -35deg;
+            --cam-ry: -45deg;
 
             --bg: orange;
             --bg-active: #e59400;
@@ -223,7 +222,6 @@
             --green-bright: #7aef48;
             --blue: #37a1d4;
             --red: #d43737;
-            --yellow: #d4d137;
         }
 
         /* 2. Base ---------------------------------------------------------------- */
@@ -282,7 +280,6 @@
             margin-bottom: 15px;
         }
 
-        /* Rows that stretch open when a solution is available */
         .dynamic-control {
             max-height: 0;
             opacity: 0;
@@ -360,7 +357,6 @@
             opacity: 0.7;
         }
 
-        /* Block-count stepper */
         .number-control {
             display: flex;
             align-items: center;
@@ -409,7 +405,6 @@
             background: var(--surface);
         }
 
-        /* Reset / Solve / Share row */
         .action-row {
             display: flex;
             flex-direction: row;
@@ -442,8 +437,6 @@
         #solveBtn:active:not(:disabled) {
             background: var(--bg-active);
         }
-
-        /* 4. Search panel (matching saved locks) --------------------------------- */
 
         .search-row {
             display: flex;
@@ -509,7 +502,6 @@
             overflow: hidden;
             visibility: hidden;
             pointer-events: none;
-            /* Same stretch animation as .solution-list (height 0.3s ease-out, no fade) */
             transition: height 0.3s ease-out, padding 0.3s ease-out, visibility 0s linear 0.3s;
         }
 
@@ -747,10 +739,7 @@
             transition: width 0.45s linear;
         }
 
-        /* 6. 3D lock scene --------------------------------------------------------
-           Careful with the translateZ offsets and the @supports blocks below:
-           they compensate for Chrome/Firefox 3D-rendering seams.
-         */
+        /* 6. 3D lock scene --------------------------------------------------------  */
 
         .scene {
             position: relative;
@@ -777,6 +766,13 @@
         }
 
         .plate {
+            --hl-rgb: 255, 255, 255;
+            --hl-fill: 0;
+            --hl-wash: 0;
+            --hl-glow: 0;
+            --hl-side: 0%;
+            --hl-time: 0.2s;
+
             position: absolute;
             top: 0;
             left: 0;
@@ -797,12 +793,16 @@
             width: 100%;
             height: 100%;
             background: linear-gradient(135deg, #2a2a2a, var(--dark));
-            border: 5px solid var(--plate-border);
+            border: 5px solid var(--hl, var(--plate-border));
             border-radius: 30px;
             box-sizing: border-box;
             transform: translateZ(12px);
-            box-shadow: inset 0 0 20px rgba(0, 0, 0, 0.9);
-            transition: border-color 0.2s, box-shadow 0.2s;
+            box-shadow:
+                    inset 0 0 20px rgba(var(--hl-rgb), var(--hl-fill)),
+                    inset 0 0 0 999px rgba(var(--hl-rgb), var(--hl-wash)),
+                    inset 0 0 20px rgba(0, 0, 0, 0.9),
+                    0 0 15px rgba(var(--hl-rgb), var(--hl-glow));
+            transition: border-color var(--hl-time), box-shadow var(--hl-time);
             outline: 1px solid transparent; /* Chrome 3D seam fix */
         }
 
@@ -844,14 +844,14 @@
 
         .right-face {
             right: 0;
-            border-right: 1px solid var(--metal);
+            border-right: 1px solid var(--face);
             transform-origin: right;
             transform: translateZ(-10.6px) rotateY(90deg);
         }
 
         .left-face {
             left: 0;
-            border-left: 1px solid var(--metal);
+            border-left: 1px solid var(--face);
             transform-origin: left;
             transform: translateZ(-13px) rotateY(-90deg);
         }
@@ -876,7 +876,7 @@
         /* Firefox specific offsets */
         @supports (-moz-appearance: none) {
             .right-face {
-                outline: 1.4px solid var(--metal) !important;
+                outline: 1.4px solid var(--face) !important;
                 transform: translateZ(-10px) rotateY(90deg);
             }
 
@@ -910,7 +910,7 @@
             width: 8px;
             height: 23px;
             background: var(--metal);
-            border-left: 1px solid var(--metal);
+            border-left: 1px solid var(--face);
             transform-origin: center center;
         }
 
@@ -919,7 +919,16 @@
         .right-face,
         .left-face,
         .tube-panel {
-            outline: 1px solid var(--metal);
+            --face: color-mix(in srgb, var(--metal), var(--hl, var(--metal)) var(--hl-side));
+            background-color: var(--face);
+            outline: 1px solid var(--face);
+            /* Deliberately not animated. A corner is 6 overlapping panels and
+               every panel edge is antialiased against whatever sits behind it,
+               so any shell colour part-way between white and metal draws its
+               own seams. At either end the corner is one flat colour and there
+               is nothing to reveal, so the shell snaps and only the front face,
+               a single element with nothing overlapping it, fades. */
+            transition: none;
         }
 
         .hole {
@@ -1018,35 +1027,50 @@
             -webkit-transform-style: preserve-3d;
         }
 
-        /* 7. Plate highlight states ----------------------------------------------
-           selected = green (linker master), linked = blue (moves together),
-           rinked = red (moves opposite), touched = white hover outline.
-        */
-
-        .plate.selected .front-face {
-            border-color: var(--green);
-            box-shadow: inset 0 0 20px rgba(102, 212, 55, 0.3), 0 0 15px rgba(102, 212, 55, 0.5);
+        .plate.selected,
+        .plate.linked,
+        .plate.rinked {
+            --hl-fill: 0.3;
+            --hl-wash: 0.16;
+            --hl-glow: 0.5;
+            --hl-side: 100%;
         }
 
-        .plate.linked .front-face {
-            border-color: var(--blue);
-            box-shadow: inset 0 0 20px rgba(55, 161, 212, 0.3), 0 0 15px rgba(55, 161, 212, 0.5);
+        .plate.selected {
+            --hl: var(--green);
+            --hl-rgb: 102, 212, 55;
         }
 
-        .plate.rinked .front-face {
-            border-color: var(--red);
-            box-shadow: inset 0 0 20px rgba(212, 55, 55, 0.3), 0 0 15px rgba(212, 55, 55, 0.5);
+        .plate.linked {
+            --hl: var(--blue);
+            --hl-rgb: 55, 161, 212;
         }
 
-        .plate.touched:not(.selected, .linked, .rinked, .selected-glow) .front-face {
-            border-color: rgba(255, 255, 255, 0.9);
-            transition: border-color 0.05s, box-shadow 0.05s;
+        .plate.rinked {
+            --hl: var(--red);
+            --hl-rgb: 212, 55, 55;
         }
 
-        .plate.touched.selected-glow .front-face {
-            border-color: var(--yellow);
-            box-shadow: inset 0 0 20px rgba(212, 209, 55, 0.3), 0 0 15px rgba(212, 204, 55, 0.5);
-            transition: border-color 0.05s, box-shadow 0.05s;
+        /* Hover, both halves of it. KEEP THESE TWO RULES IDENTICAL - see the
+           note above the :hover half. Opaque white on purpose: at 100% a
+           translucent --hl would leave --face with alpha below 1, and the
+           overlapping corner panels would stack visibly. */
+        .plate.touched:not(.selected, .linked, .rinked) {
+            --hl: rgba(255, 255, 255, 1);
+            --hl-wash: 0.09;
+            --hl-side: 100%;
+        }
+
+        .plate.touched {
+            --hl-time: 0.05s;
+        }
+
+        body.is-zooming .plate {
+            --hl-fill: 0;
+            --hl-wash: 0;
+            --hl-glow: 0;
+            --hl-side: 0%;
+            --hl-time: 0s;
         }
 
         body.is-zooming .plate .front-face {
@@ -1072,14 +1096,14 @@
                 background: var(--green-bright);
             }
 
-            .plate.glow:not(.selected, .linked, .rinked, .selected-glow):hover .front-face {
-                border-color: rgba(255, 255, 255, 0.9);
-                transition: border-color 0.1s, box-shadow 0.1s;
-            }
-
-            .plate.selected-glow:hover .front-face {
-                border-color: var(--yellow);
-                box-shadow: inset 0 0 20px rgba(212, 209, 55, 0.3), 0 0 15px rgba(212, 204, 55, 0.5);
+            /* The CSS half of hover. The JS half is .plate.touched, added by
+               updateHoverPreview() on mouseenter - and by the guide, which is
+               why the two have to agree or the guide shows a different plate
+               than the mouse does. */
+            .plate.glow:not(.selected, .linked, .rinked):hover {
+                --hl: rgba(255, 255, 255, 1);
+                --hl-wash: 0.09;
+                --hl-side: 100%;
             }
         }
 
@@ -1225,12 +1249,7 @@
             display: block;
         }
 
-        /* 10. Footer --------------------------------------------------------------
-           Markup and styling both come from footer.js. Only the two app-specific
-           bits live here, and they need `body` in front of them to outrank the
-           component's own rules, which are injected into <head> after this
-           stylesheet.
-         */
+        /* 10. Footer -------------------------------------------------------------- */
 
         footer {
             transition: opacity 0.3s ease-out;
@@ -1346,8 +1365,6 @@
                 display: block;
             }
 
-            /* Promote header children to panel flex items so the close
-               button can be reordered below the list */
             .search-panel-header {
                 display: contents;
             }
@@ -1372,7 +1389,6 @@
                 font-size: 15px;
             }
 
-            /* Action row ordering */
             #resetBtn { order: 1; }
             #shareBtn { order: 2; }
             #solveBtn { order: 3; }
@@ -1402,7 +1418,6 @@
                 text-align: center;
             }
 
-            /* Stepper: fixed-size buttons, inspector row fills the middle */
             #blockCountContainer .number-control {
                 gap: 6px;
             }
@@ -1423,7 +1438,6 @@
                 padding: 0 2px;
             }
 
-            /* Solution list collapses to a single-line ticker */
             .dynamic-control.show-stretch {
                 margin-top: 6px;
                 max-height: 200px;
@@ -1504,7 +1518,7 @@
             }
         }
 
-        /* 12. SEO / About panel ------------------------------------------------ */
+        /* 12. About panel ------------------------------------------------ */
 
         .sr-only {
             position: absolute;
@@ -1521,7 +1535,6 @@
         .about-panel {
             position: fixed;
             inset: 0;
-            /* under the footer (1001) so guide nav stays clickable, over the tutorial overlay (999) */
             z-index: 1000;
             display: none;
             overflow-y: auto;
@@ -1798,6 +1811,8 @@
             <li><a href="https://github.com/Vjattich/gothic-lockpicker" target="_blank">Source code on GitHub</a></li>
             <li><a href="https://steamcommunity.com/sharedfiles/filedetails/?id=3744604034" target="_blank">Steam guide</a>
             </li>
+            <li><a href="https://t.me/arsinioum" target="_blank">Telegram channel</a></li>
+            <li><a href="https://t.me/+oju8lTGAetsxOWJi" target="_blank">Telegram group</a></li>
         </ul>
 
         <p class="about-note">
