@@ -15,7 +15,8 @@ const UI_CLASSES = {
     PLATE: 'plate',
     HOLE: 'hole',
     ZOOMING: 'is-zooming',
-    DRAGGING: 'is-dragging'
+    DRAGGING: 'is-dragging',
+    ORBITING: 'is-orbiting'
 };
 
 const ACTIONS = {
@@ -189,6 +190,10 @@ const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
 function getClientX(e) {
     return e.touches && e.touches.length > 0 ? e.touches[0].clientX : e.clientX;
+}
+
+function getClientY(e) {
+    return e.touches && e.touches.length > 0 ? e.touches[0].clientY : e.clientY;
 }
 
 function vibrate(duration) {
@@ -480,9 +485,9 @@ shareBtn.addEventListener('click', () => {
     navigator.clipboard.writeText(url.toString()).then(() => {
 
         const message = 'Copied to clipboard!',
-              idx =statusMsg.className.lastIndexOf('-') + 1,
-              prevMessage = statusMsg.textContent,
-              prevMessageType =  statusMsg.className.substring(idx, statusMsg.className.length)
+            idx =statusMsg.className.lastIndexOf('-') + 1,
+            prevMessage = statusMsg.textContent,
+            prevMessageType =  statusMsg.className.substring(idx, statusMsg.className.length)
 
         setStatus(message, 'success');
         clearTimeout(shareStatusTimeout);
@@ -1308,7 +1313,10 @@ function handleDragStart(e) {
     }
 
     const clickedPlate = e.target.closest(`.${UI_CLASSES.PLATE}`);
-    if (!clickedPlate) return;
+    if (!clickedPlate) {
+        startOrbit(e);
+        return;
+    }
 
     if (e.type === 'mousedown') e.preventDefault();
     if (playback.solution) clearSolutionUI();
@@ -1383,6 +1391,11 @@ function handleDragMove(e) {
         return;
     }
 
+    if (orbitState.active) {
+        moveOrbit(e);
+        return;
+    }
+
     const dragState = gameState.dragState;
     if (!dragState.activePlate || 0 === dragState.movingGroup.length || gameState.activeLinkerId) return;
 
@@ -1396,6 +1409,8 @@ function handleDragMove(e) {
 }
 
 function handleDragEnd(e) {
+    endOrbit();
+
     const {dragState} = gameState;
     const {activePlate, movingGroup, isDragging} = dragState;
 
@@ -1506,6 +1521,127 @@ function setupLongPress(button, stepFunction) {
         stepFunction(false);
     });
 }
+
+/* 11b. Camera orbit ----------------------------------------------------------
+   The lock is a CSS 3D scene, so "the camera" is just the two rotations on
+   .lock-mechanism. Dragging any empty space turns them; double-clicking that
+   same empty space puts them back. Plates keep the pointer for themselves, so
+   this only ever runs when the press missed one.
+ */
+
+const
+    CAMERA_REST = {rx: -30, ry: -40},
+    CAMERA_MIN = -85,
+    CAMERA_MAX = 85,
+    ORBIT_DEG_PER_PX = 0.4,
+    DOUBLE_TAP_MS = 320,
+    ORBIT_BLOCKERS = '.controls, footer, .about-panel, .search-panel, .tutorial-bubble, .tutorial-key, a, button, input';
+
+const camera = {rx: CAMERA_REST.rx, ry: CAMERA_REST.ry};
+
+const orbitState = {
+    active: false,
+    moved: false,
+    startX: 0,
+    startY: 0,
+    currentX: 0,
+    currentY: 0,
+    startRx: 0,
+    startRy: 0,
+    rafId: null,
+    lastTapTime: 0
+};
+
+const clampAngle = (deg) => Math.max(CAMERA_MIN, Math.min(deg, CAMERA_MAX));
+
+function setCamera(rx, ry) {
+    camera.rx = clampAngle(rx);
+    camera.ry = clampAngle(ry);
+    const style = document.documentElement.style;
+    style.setProperty('--cam-rx', `${camera.rx.toFixed(2)}deg`);
+    style.setProperty('--cam-ry', `${camera.ry.toFixed(2)}deg`);
+}
+
+function resetCamera() {
+    document.body.classList.remove(UI_CLASSES.ORBITING);
+    setCamera(CAMERA_REST.rx, CAMERA_REST.ry);
+}
+
+function isOrbitSurface(target) {
+    return target instanceof Element && !target.closest(ORBIT_BLOCKERS);
+}
+
+/** rAF-batched, same as the plate drag: pointer events outrun repaints. */
+function applyOrbit() {
+    orbitState.rafId = null;
+    if (!orbitState.active) return;
+
+    const
+        dx = orbitState.currentX - orbitState.startX,
+        dy = orbitState.currentY - orbitState.startY;
+
+    if (!orbitState.moved) {
+        if (Math.hypot(dx, dy) < DRAG_THRESHOLD) return;
+        orbitState.moved = true;
+        document.body.classList.add(UI_CLASSES.ORBITING);
+    }
+
+    // Drag right and the front face follows the pointer; drag down and the top
+    // tips towards you. Both are the "grab the object" convention.
+    setCamera(
+        orbitState.startRx - dy * ORBIT_DEG_PER_PX,
+        orbitState.startRy + dx * ORBIT_DEG_PER_PX
+    );
+}
+
+function startOrbit(e) {
+    if (isGuideActive) return;
+    if (e.touches && 1 !== e.touches.length) return;
+    if (!isOrbitSurface(e.target)) return;
+
+    if (Date.now() - orbitState.lastTapTime < DOUBLE_TAP_MS) {
+        orbitState.lastTapTime = 0;
+        resetCamera();
+        return;
+    }
+
+    if ('mousedown' === e.type) e.preventDefault();
+
+    orbitState.active = true;
+    orbitState.moved = false;
+    orbitState.startX = orbitState.currentX = getClientX(e);
+    orbitState.startY = orbitState.currentY = getClientY(e);
+    orbitState.startRx = camera.rx;
+    orbitState.startRy = camera.ry;
+}
+
+function moveOrbit(e) {
+    if (e.cancelable) e.preventDefault();
+
+    orbitState.currentX = getClientX(e);
+    orbitState.currentY = getClientY(e);
+
+    if (!orbitState.rafId) {
+        orbitState.rafId = requestAnimationFrame(applyOrbit);
+    }
+}
+
+function endOrbit() {
+    if (!orbitState.active) return;
+
+    if (orbitState.rafId) {
+        cancelAnimationFrame(orbitState.rafId);
+        orbitState.rafId = null;
+    }
+
+    // A press that never moved is half of a double tap; a drag is not.
+    orbitState.lastTapTime = orbitState.moved ? 0 : Date.now();
+    orbitState.active = false;
+    orbitState.moved = false;
+    document.body.classList.remove(UI_CLASSES.ORBITING);
+}
+
+setCamera(CAMERA_REST.rx, CAMERA_REST.ry);
 
 /* 12. INSPECTOR ROW -------------------------------------------------------------------- */
 
