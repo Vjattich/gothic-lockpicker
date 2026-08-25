@@ -131,6 +131,19 @@ const gameState = {
         rafId: null,
         currentClientX: 0
     },
+    orbitState: {
+        active: false,
+        moved: false,
+        isTouch: false,
+        startX: 0,
+        startY: 0,
+        currentX: 0,
+        currentY: 0,
+        startRx: 0,
+        startRy: 0,
+        rafId: null,
+        lastTapTime: 0
+    },
     isMobile: false,
     lastTouchTime: 0,
     lastAction: null,
@@ -342,6 +355,29 @@ function getCatalogueMatches(catalogue) {
     return candidates.filter(e => e.links === links);
 }
 
+function findCatalogueEntry() {
+    const source = 'undefined' !== typeof LOCK_CATALOGUE ? LOCK_CATALOGUE : null;
+    if (!source) return null;
+
+    const
+        n = gameState.blocks.length,
+        pos = currentPosString().join(','),
+        links = currentLinksString();
+
+    return source.find(e => e.n === n && e.pos === pos && (e.links || '') === links) || null;
+}
+
+function applyCatalogueTitle() {
+    //db are not ready
+    if ('undefined' === typeof LOCK_CATALOGUE) {
+        window.addEventListener('load', applyCatalogueTitle, {once: true});
+        return;
+    }
+
+    const entry = findCatalogueEntry();
+    if (entry) setPickedLock(decodeTitle(entry.title));
+}
+
 function refreshMatches() {
 
     if (gameState.isSolving) {
@@ -484,6 +520,7 @@ function loadFromURL() {
     }
 
     applySetup(setup);
+    applyCatalogueTitle();
 
     const cleanUrl = new URL(window.location.href);
     cleanUrl.searchParams.delete('state');
@@ -1106,12 +1143,12 @@ function createPlate(id, prevX, zPos) {
     pin.dataset.wasOverHole = 'true';
 
     plate.addEventListener('mouseenter', () => {
-        if (gameState.dragState.activePlate) return;
+        if (gameState.dragState.activePlate || gameState.orbitState.active) return;
         if (Date.now() - (gameState.lastTouchTime || 0) < 500) return; // ignore synthetic post-touch hover
         updateHoverPreview(plate);
     });
     plate.addEventListener('mouseleave', () => {
-        if (gameState.dragState.activePlate) return;
+        if (gameState.dragState.activePlate || gameState.orbitState.active) return;
         clearHoverPreview(true);
     });
     plate.addEventListener('touchstart', () => clearHoverPreview(true), {passive: true});
@@ -1336,9 +1373,18 @@ function handleDragStart(e) {
         return;
     }
 
+    if ('mousedown' === e.type) {
+        if (ORBIT_MOUSE_BTN === e.button) {
+            e.preventDefault();
+            startOrbit(e);
+            return;
+        }
+        if (0 !== e.button) return;
+    }
+
     const clickedPlate = e.target.closest(`.${UI_CLASSES.PLATE}`);
     if (!clickedPlate) {
-        startOrbit(e);
+        if (touches) startOrbit(e);
         return;
     }
 
@@ -1415,7 +1461,7 @@ function handleDragMove(e) {
         return;
     }
 
-    if (orbitState.active) {
+    if (gameState.orbitState.active) {
         moveOrbit(e);
         return;
     }
@@ -1548,32 +1594,20 @@ function setupLongPress(button, stepFunction) {
 
 /* 11b. Camera orbit ----------------------------------------------------------
    The lock is a CSS 3D scene, so "the camera" is just the two rotations on
-   .lock-mechanism. Dragging any empty space turns them; double-clicking that
-   same empty space puts them back. Plates keep the pointer for themselves, so
-   this only ever runs when the press missed one.
+   .lock-mechanism. Holding the middle mouse button turns them from anywhere,
+   plates included; double-clicking it puts them back. On touch there is no
+   middle button, so one finger on empty space does the same job.
  */
 
 const
     CAMERA_REST = {rx: -35, ry: -45},
     CAMERA_RANGE = {rx: [-85, 0], ry: [-85, 0]},
     ORBIT_DEG_PER_PX = 0.4,
+    ORBIT_MOUSE_BTN = 1,
     DOUBLE_TAP_MS = 320,
     ORBIT_BLOCKERS = '.controls, footer, .about-panel, .search-panel, .tutorial-bubble, .tutorial-key, a, button, input';
 
 const camera = {rx: CAMERA_REST.rx, ry: CAMERA_REST.ry};
-
-const orbitState = {
-    active: false,
-    moved: false,
-    startX: 0,
-    startY: 0,
-    currentX: 0,
-    currentY: 0,
-    startRx: 0,
-    startRy: 0,
-    rafId: null,
-    lastTapTime: 0
-};
 
 const clampAngle = (deg, [min, max]) => Math.max(min, Math.min(deg, max));
 
@@ -1595,6 +1629,8 @@ function isOrbitSurface(target) {
 }
 
 function applyOrbit() {
+    const {orbitState} = gameState;
+
     orbitState.rafId = null;
     if (!orbitState.active) return;
 
@@ -1606,6 +1642,7 @@ function applyOrbit() {
         if (Math.hypot(dx, dy) < DRAG_THRESHOLD) return;
         orbitState.moved = true;
         document.body.classList.add(UI_CLASSES.ORBITING);
+        clearHoverPreview(true);
     }
 
     // Drag right and the front face follows the pointer; drag down and the top
@@ -1621,16 +1658,19 @@ function startOrbit(e) {
     if (e.touches && 1 !== e.touches.length) return;
     if (!isOrbitSurface(e.target)) return;
 
+    if ('mousedown' === e.type) e.preventDefault();
+
+    const {orbitState} = gameState;
+
     if (Date.now() - orbitState.lastTapTime < DOUBLE_TAP_MS) {
         orbitState.lastTapTime = 0;
         resetCamera();
         return;
     }
 
-    if ('mousedown' === e.type) e.preventDefault();
-
     orbitState.active = true;
     orbitState.moved = false;
+    orbitState.isTouch = !!e.touches;
     orbitState.startX = orbitState.currentX = getClientX(e);
     orbitState.startY = orbitState.currentY = getClientY(e);
     orbitState.startRx = camera.rx;
@@ -1639,6 +1679,8 @@ function startOrbit(e) {
 
 function moveOrbit(e) {
     if (e.cancelable) e.preventDefault();
+
+    const {orbitState} = gameState;
 
     orbitState.currentX = getClientX(e);
     orbitState.currentY = getClientY(e);
@@ -1649,6 +1691,7 @@ function moveOrbit(e) {
 }
 
 function endOrbit() {
+    const {orbitState} = gameState;
     if (!orbitState.active) return;
 
     if (orbitState.rafId) {
@@ -1656,11 +1699,24 @@ function endOrbit() {
         orbitState.rafId = null;
     }
 
+    const turned = orbitState.moved;
+
     // A press that never moved is half of a double tap; a drag is not.
     orbitState.lastTapTime = orbitState.moved ? 0 : Date.now();
     orbitState.active = false;
     orbitState.moved = false;
     document.body.classList.remove(UI_CLASSES.ORBITING);
+
+    if (!turned || orbitState.isTouch) return;
+
+    // The scene rotated under a cursor that never moved, so no mouseenter is
+    // coming. Ask the DOM which plate is under the pointer now — after the
+    // turn it may well be a different one than we started on.
+    const plate = document
+        .elementFromPoint(orbitState.currentX, orbitState.currentY)
+        ?.closest(`.${UI_CLASSES.PLATE}`);
+
+    if (plate) updateHoverPreview(plate);
 }
 
 setCamera(CAMERA_REST.rx, CAMERA_REST.ry);
@@ -1818,6 +1874,7 @@ document.addEventListener('touchstart', handleDragStart, {passive: false});
 document.addEventListener('touchmove', handleDragMove, {passive: false});
 window.addEventListener('touchend', handleDragEnd);
 document.addEventListener('touchcancel', handleDragEnd);
+window.addEventListener('blur', endOrbit);
 
 if (!loadFromURL()) {
     renderBlocks();
